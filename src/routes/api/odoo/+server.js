@@ -1,12 +1,12 @@
 import { json } from '@sveltejs/kit';
 import {
-	PUBLIC_ODOO_URL,
-	PUBLIC_ODOO_DB,
-	PUBLIC_ODOO_USERNAME,
-	PUBLIC_ODOO_PASSWORD,
-	PUBLIC_ODOO_API_KEY,
-	PUBLIC_ODOO_EXPENSE_MODEL
-} from '$env/static/public';
+	ODOO_URL,
+	ODOO_DB,
+	ODOO_USERNAME,
+	ODOO_PASSWORD,
+	ODOO_API_KEY,
+	ODOO_EXPENSE_MODEL
+} from '$env/static/private';
 
 /** @type {number|null} */
 let cachedUid = null;
@@ -18,7 +18,7 @@ let cachedUid = null;
  * @param {any[]} args
  */
 async function callOdoo(service, method, args) {
-	const response = await fetch(`${PUBLIC_ODOO_URL}/jsonrpc`, {
+	const response = await fetch(`${ODOO_URL}/jsonrpc`, {
 		method: 'POST',
 		headers: {
 			'Content-Type': 'application/json'
@@ -51,10 +51,10 @@ async function authenticate() {
 	if (cachedUid) return cachedUid;
 
 	const authMethod =
-		PUBLIC_ODOO_API_KEY && PUBLIC_ODOO_API_KEY.trim() !== ''
-			? PUBLIC_ODOO_API_KEY
-			: PUBLIC_ODOO_PASSWORD;
-	const uid = await callOdoo('common', 'login', [PUBLIC_ODOO_DB, PUBLIC_ODOO_USERNAME, authMethod]);
+		ODOO_API_KEY && ODOO_API_KEY.trim() !== ''
+			? ODOO_API_KEY
+			: ODOO_PASSWORD;
+	const uid = await callOdoo('common', 'login', [ODOO_DB, ODOO_USERNAME, authMethod]);
 
 	if (!uid) {
 		throw new Error('Authentication failed');
@@ -74,12 +74,12 @@ async function authenticate() {
 async function execute(model, method, args = [], kwargs = {}) {
 	const uid = await authenticate();
 	const authMethod =
-		PUBLIC_ODOO_API_KEY && PUBLIC_ODOO_API_KEY.trim() !== ''
-			? PUBLIC_ODOO_API_KEY
-			: PUBLIC_ODOO_PASSWORD;
+		ODOO_API_KEY && ODOO_API_KEY.trim() !== ''
+			? ODOO_API_KEY
+			: ODOO_PASSWORD;
 
 	return await callOdoo('object', 'execute_kw', [
-		PUBLIC_ODOO_DB,
+		ODOO_DB,
 		uid,
 		authMethod,
 		model,
@@ -96,37 +96,37 @@ export async function POST({ request }) {
 
 		switch (action) {
 			case 'create': {
-				const id = await execute(PUBLIC_ODOO_EXPENSE_MODEL, 'create', [data]);
+						const id = await execute(ODOO_EXPENSE_MODEL, 'create', [data]);
 				return json({ success: true, id });
 			}
 
 			// Search any model (used by frontend to load res.partner list)
 			case 'search_model': {
 				const { model, domain = [], fields = [] } = data;
-				const results = await execute(model, 'search_read', [domain], { fields });
+						const results = await execute(model, 'search_read', [domain], { fields });
 				return json({ success: true, results });
 			}
 
 			case 'search': {
 				const { domain = [], fields = [] } = data;
-				const results = await execute(
-					PUBLIC_ODOO_EXPENSE_MODEL,
-					'search_read',
-					[domain],
-					{ fields }
-				);
+						const results = await execute(
+							ODOO_EXPENSE_MODEL,
+							'search_read',
+							[domain],
+							{ fields }
+						);
 				return json({ success: true, results });
 			}
 
 			case 'update': {
 				const { id, values } = data;
-				const result = await execute(PUBLIC_ODOO_EXPENSE_MODEL, 'write', [[id], values]);
+						const result = await execute(ODOO_EXPENSE_MODEL, 'write', [[id], values]);
 				return json({ success: true, result });
 			}
 
 			case 'delete': {
 				const { id } = data;
-				const result = await execute(PUBLIC_ODOO_EXPENSE_MODEL, 'unlink', [[id]]);
+						const result = await execute(ODOO_EXPENSE_MODEL, 'unlink', [[id]]);
 				return json({ success: true, result });
 			}
 
