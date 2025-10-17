@@ -11,6 +11,8 @@ A Progressive Web App for splitting grocery and hotel bills between roommates. B
 - 📱 Progressive Web App (installable on mobile)
 - 🎨 Beautiful, modern UI
 
+
+
 ## Prerequisites
 
 1. **Odoo 19.0 SaaS** with Studio module installed
