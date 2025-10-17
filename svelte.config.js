@@ -10,7 +10,8 @@ const config = {
 			fallback: 'index.html'
 		}),
 		paths: {
-			base: process.env.NODE_ENV === 'production' ? '/expense-split-pwa' : ''
+			// Use PUBLIC_BASE_PATH env var when provided (CI or manual override). Otherwise empty.
+			base: process.env.PUBLIC_BASE_PATH ? process.env.PUBLIC_BASE_PATH : ''
 		}
 	}
 };
