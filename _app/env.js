@@ -1,1 +1,1 @@
-export const env={"PUBLIC_ODOO_URL":"https://jstudio.odoo.com","PUBLIC_ODOO_DB":"jstudio","PUBLIC_ODOO_USERNAME":"jamshid.kakunderi@gmail.com","PUBLIC_ODOO_PASSWORD":"You526696605","PUBLIC_ODOO_API_KEY":"49fe968f3227cd3b3e4fd81186a6c79334b601bb","PUBLIC_ODOO_EXPENSE_MODEL":"x_expensesplit","PUBLIC_BASE_PATH":"/expense-split-pwa"}
+export const env={"PUBLIC_ODOO_PASSWORD":"","PUBLIC_BASE_PATH":"/expense-split-pwa","PUBLIC_ODOO_URL":"","PUBLIC_ODOO_DB":"","PUBLIC_ODOO_USERNAME":"","PUBLIC_ODOO_EXPENSE_MODEL":"","PUBLIC_ODOO_API_KEY":""}
