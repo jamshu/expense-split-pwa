@@ -33,6 +33,7 @@ jobs:
       - name: Build
         env:
           NODE_ENV: production
+          PUBLIC_API_URL: ${{ secrets.PUBLIC_ODOO_URL }}
           PUBLIC_ODOO_URL: ${{ secrets.ODOO_URL }}
           PUBLIC_ODOO_DB: ${{ secrets.ODOO_DB }}
           PUBLIC_ODOO_USERNAME: ${{ secrets.ODOO_USERNAME }}
