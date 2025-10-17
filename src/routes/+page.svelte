@@ -13,7 +13,11 @@
 
 	onMount(async () => {
 		try {
-			partners = await odooClient.fetchPartners();
+			// try to load configured default participants first; fallback to all partners
+			partners = await odooClient.fetchDefaultParticipants();
+			if (!partners || partners.length === 0) {
+				partners = await odooClient.fetchPartners();
+			}
 		} catch (err) {
 			console.error('Failed to load partners', err);
 		}

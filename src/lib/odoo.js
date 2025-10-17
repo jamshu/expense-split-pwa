@@ -81,6 +81,24 @@ class OdooAPI {
 	}
 
 	/**
+	 * Fetch default participants configured in x_expense_participants model.
+	 * Expects a single record with field `x_studio_default_participants` containing partner ids.
+	 * Returns Array<{id:number, display_name:string}> limited to the configured list.
+	 */
+	async fetchDefaultParticipants() {
+		// read the one configuration record
+		const cfg = await this.searchModel('x_expense_participants', [], ['id', 'x_studio_default_participants']);
+		if (!Array.isArray(cfg) || cfg.length === 0) return [];
+		const first = cfg[0];
+		const ids = (first.x_studio_default_participants || []).map(
+			/** @param {any} i */ (i) => Number(i)
+		);
+		if (ids.length === 0) return [];
+		// fetch partner display names for these ids
+		return await this.searchModel('res.partner', [['id', 'in', ids]], ['id', 'display_name']);
+	}
+
+	/**
 	 * Helpers to format Odoo relational fields
 	 */
 	/**
