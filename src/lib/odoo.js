@@ -1,6 +1,11 @@
 // @ts-check
 import { base } from '$app/paths';
 
+// Read PUBLIC_API_URL from Vite environment at build time (optional)
+const PUBLIC_API_URL = typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.PUBLIC_API_URL
+	? String(import.meta.env.PUBLIC_API_URL)
+	: '';
+
 /**
  * @typedef {Object} OdooClient
  * @property {(fields: Record<string, any>) => Promise<number>} createExpense
@@ -11,7 +16,14 @@ import { base } from '$app/paths';
 
 class OdooAPI {
 	constructor() {
-		this.apiUrl = `${base}/api/odoo`;
+		// If a PUBLIC_API_URL is set at build time, use it as the API base.
+		// This is required when the frontend is deployed to a static host (GitHub Pages)
+		// and the server proxy runs on a separate host (e.g. Vercel/Render).
+		if (PUBLIC_API_URL && PUBLIC_API_URL.trim() !== '') {
+			this.apiUrl = `${PUBLIC_API_URL.replace(/\/$/, '')}/api/odoo`;
+		} else {
+			this.apiUrl = `${base}/api/odoo`;
+		}
 	}
 
 	/**
