@@ -201,7 +201,7 @@
 													<ul>
 														{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
 																	<li>
-																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} 
+																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_date})
 																	</li>
 									{/each}
 								</ul>
