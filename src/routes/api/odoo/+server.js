@@ -3,7 +3,6 @@ import {
 	ODOO_URL,
 	ODOO_DB,
 	ODOO_USERNAME,
-	ODOO_PASSWORD,
 	ODOO_API_KEY,
 	ODOO_EXPENSE_MODEL
 } from '$env/static/private';
@@ -50,10 +49,7 @@ async function callOdoo(service, method, args) {
 async function authenticate() {
 	if (cachedUid) return cachedUid;
 
-	const authMethod =
-		ODOO_API_KEY && ODOO_API_KEY.trim() !== ''
-			? ODOO_API_KEY
-			: ODOO_PASSWORD;
+	const authMethod = ODOO_API_KEY;
 	const uid = await callOdoo('common', 'login', [ODOO_DB, ODOO_USERNAME, authMethod]);
 
 	if (!uid) {
@@ -73,10 +69,7 @@ async function authenticate() {
  */
 async function execute(model, method, args = [], kwargs = {}) {
 	const uid = await authenticate();
-	const authMethod =
-		ODOO_API_KEY && ODOO_API_KEY.trim() !== ''
-			? ODOO_API_KEY
-			: ODOO_PASSWORD;
+	const authMethod = ODOO_API_KEY;
 
 	return await callOdoo('object', 'execute_kw', [
 		ODOO_DB,
