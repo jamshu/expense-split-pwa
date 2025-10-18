@@ -198,8 +198,8 @@
 							{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
 								<p class="empty">No payments made by this participant.</p>
 							{:else}
-								<ul>
-									{#each expenses.filter(e => e.x_studio_who_paid === selectedParticipant) as expense}
+													<ul>
+														{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
 																	<li>
 																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} 
 																	</li>
@@ -212,10 +212,10 @@
 							{#if expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length === 0}
 								<p class="empty">No expenses include this participant.</p>
 							{:else}
-								<ul>
-									{#each expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)) as expense}
+													<ul>
+														{#each [...expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
 																	<li>
-																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({formatCurrency(expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0)})
+																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_date},{formatCurrency(expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0)})
 																	</li>
 									{/each}
 								</ul>
