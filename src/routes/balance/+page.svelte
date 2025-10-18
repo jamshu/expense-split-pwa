@@ -9,6 +9,9 @@
 	let balances = {};
 	let settlements = [];
 
+	let selectedParticipant = '';
+	let showParticipantDetails = false;
+
 	onMount(async () => {
 		try {
 			expenses = await odooClient.searchExpenses([], [
@@ -20,79 +23,79 @@
 				'x_studio_date'
 			]);
 
-				// Resolve partner ids to display names so the report shows names (not raw ids)
-				try {
-					// collect partner ids from who_paid and participants
-					const partnerIds = new Set();
-					for (const e of expenses) {
-						// who_paid: could be [id, name], object, or id
-						if (Array.isArray(e.x_studio_who_paid) && e.x_studio_who_paid.length > 0) {
-							partnerIds.add(Number(e.x_studio_who_paid[0]));
-						} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'number') {
-							partnerIds.add(Number(e.x_studio_who_paid));
-						} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'string' && /^\d+$/.test(e.x_studio_who_paid)) {
-							partnerIds.add(Number(e.x_studio_who_paid));
-						}
-
-						// participants: may be array of ids, array of tuples, or comma string
-						const parts = e.x_studio_participants;
-						if (Array.isArray(parts)) {
-							for (const p of parts) {
-								if (Array.isArray(p) && p.length > 0) partnerIds.add(Number(p[0]));
-								else if (typeof p === 'number') partnerIds.add(Number(p));
-								else if (typeof p === 'string' && /^\d+$/.test(p)) partnerIds.add(Number(p));
-							}
-						}
+			// Resolve partner ids to display names so the report shows names (not raw ids)
+			try {
+				// collect partner ids from who_paid and participants
+				const partnerIds = new Set();
+				for (const e of expenses) {
+					// who_paid: could be [id, name], object, or id
+					if (Array.isArray(e.x_studio_who_paid) && e.x_studio_who_paid.length > 0) {
+						partnerIds.add(Number(e.x_studio_who_paid[0]));
+					} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'number') {
+						partnerIds.add(Number(e.x_studio_who_paid));
+					} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'string' && /^\d+$/.test(e.x_studio_who_paid)) {
+						partnerIds.add(Number(e.x_studio_who_paid));
 					}
 
-					if (partnerIds.size > 0) {
-						const ids = Array.from(partnerIds);
-						const partners = await odooClient.searchModel('res.partner', [['id', 'in', ids]], ['id', 'display_name']);
-						const partnerMap = new Map(partners.map((p) => [Number(p.id), p.display_name]));
-
-						// replace ids in expenses with display names where possible
-						expenses = expenses.map((e) => {
-							const copy = { ...e };
-							// who_paid
-							if (Array.isArray(copy.x_studio_who_paid) && copy.x_studio_who_paid.length > 0) {
-								const id = Number(copy.x_studio_who_paid[0]);
-								copy.x_studio_who_paid = partnerMap.get(id) || String(copy.x_studio_who_paid[1] || id);
-							} else if (typeof copy.x_studio_who_paid === 'number' || (typeof copy.x_studio_who_paid === 'string' && /^\d+$/.test(copy.x_studio_who_paid))) {
-								const id = Number(copy.x_studio_who_paid);
-								copy.x_studio_who_paid = partnerMap.get(id) || String(id);
-							}
-
-							// participants
-							const parts = copy.x_studio_participants;
-							if (Array.isArray(parts)) {
-								const names = [];
-								for (const p of parts) {
-									if (Array.isArray(p) && p.length > 0) {
-										const id = Number(p[0]);
-										names.push(partnerMap.get(id) || String(p[1] || id));
-									} else if (typeof p === 'number' || (typeof p === 'string' && /^\d+$/.test(p))) {
-										const id = Number(p);
-										names.push(partnerMap.get(id) || String(id));
-									} else if (typeof p === 'object' && p) {
-										names.push(String(p.display_name || p.name || p.id || JSON.stringify(p)));
-									} else {
-										names.push(String(p));
-									}
-								}
-								copy.x_studio_participants = names;
-							} else if (typeof parts === 'string') {
-								// leave as-is (comma-separated names)
-							}
-
-							return copy;
-						});
+					// participants: may be array of ids, array of tuples, or comma string
+					const parts = e.x_studio_participants;
+					if (Array.isArray(parts)) {
+						for (const p of parts) {
+							if (Array.isArray(p) && p.length > 0) partnerIds.add(Number(p[0]));
+							else if (typeof p === 'number') partnerIds.add(Number(p));
+							else if (typeof p === 'string' && /^\d+$/.test(p)) partnerIds.add(Number(p));
+						}
 					}
-				} catch (mapErr) {
-					console.warn('Failed to map partner ids to names', mapErr);
 				}
 
-				balances = calculateBalances(expenses);
-				settlements = calculateSettlements(balances);
+				if (partnerIds.size > 0) {
+					const ids = Array.from(partnerIds);
+					const partners = await odooClient.searchModel('res.partner', [['id', 'in', ids]], ['id', 'display_name']);
+					const partnerMap = new Map(partners.map((p) => [Number(p.id), p.display_name]));
+
+					// replace ids in expenses with display names where possible
+					expenses = expenses.map((e) => {
+						const copy = { ...e };
+						// who_paid
+						if (Array.isArray(copy.x_studio_who_paid) && copy.x_studio_who_paid.length > 0) {
+							const id = Number(copy.x_studio_who_paid[0]);
+							copy.x_studio_who_paid = partnerMap.get(id) || String(copy.x_studio_who_paid[1] || id);
+						} else if (typeof copy.x_studio_who_paid === 'number' || (typeof copy.x_studio_who_paid === 'string' && /^\d+$/.test(copy.x_studio_who_paid))) {
+							const id = Number(copy.x_studio_who_paid);
+							copy.x_studio_who_paid = partnerMap.get(id) || String(id);
+						}
+
+						// participants
+						const parts = copy.x_studio_participants;
+						if (Array.isArray(parts)) {
+							const names = [];
+							for (const p of parts) {
+								if (Array.isArray(p) && p.length > 0) {
+									const id = Number(p[0]);
+									names.push(partnerMap.get(id) || String(p[1] || id));
+								} else if (typeof p === 'number' || (typeof p === 'string' && /^\d+$/.test(p))) {
+									const id = Number(p);
+									names.push(partnerMap.get(id) || String(id));
+								} else if (typeof p === 'object' && p) {
+									names.push(String(p.display_name || p.name || p.id || JSON.stringify(p)));
+								} else {
+									names.push(String(p));
+								}
+							}
+							copy.x_studio_participants = names;
+						} else if (typeof parts === 'string') {
+							// leave as-is (comma-separated names)
+						}
+
+						return copy;
+					});
+				}
+			} catch (mapErr) {
+				console.warn('Failed to map partner ids to names', mapErr);
+			}
+
+			balances = calculateBalances(expenses);
+			settlements = calculateSettlements(balances);
 		} catch (err) {
 			error = err.message;
 		} finally {
@@ -105,6 +108,15 @@
 			style: 'currency',
 			currency: 'SAR'
 		}).format(amount);
+	}
+
+	function openParticipantDetails(person) {
+		selectedParticipant = person;
+		showParticipantDetails = true;
+	}
+
+	function closeParticipantDetails() {
+		showParticipantDetails = false;
 	}
 </script>
 
@@ -132,7 +144,7 @@
 			{:else}
 				<div class="balance-list">
 					{#each Object.entries(balances) as [person, balance]}
-						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0}>
+						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0} on:click={() => openParticipantDetails(person)} style="cursor:pointer;">
 							<span class="person">{person}</span>
 							<span class="amount" class:green={balance > 0} class:red={balance < 0}>
 								{formatCurrency(Math.abs(balance))}
@@ -147,6 +159,42 @@
 						</div>
 					{/each}
 				</div>
+
+				{#if showParticipantDetails}
+					<div class="modal-bg" on:click={closeParticipantDetails}></div>
+					<div class="participant-modal">
+						<h3>Details for <span class="person">{selectedParticipant}</span></h3>
+						<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
+						<div class="participant-section">
+							<h4>Payments made by {selectedParticipant}</h4>
+							{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
+								<p class="empty">No payments made by this participant.</p>
+							{:else}
+								<ul>
+									{#each expenses.filter(e => e.x_studio_who_paid === selectedParticipant) as expense}
+										<li>
+											{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_type})
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+						<div class="participant-section">
+							<h4>Expenses including {selectedParticipant}</h4>
+							{#if expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length === 0}
+								<p class="empty">No expenses include this participant.</p>
+							{:else}
+								<ul>
+									{#each expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)) as expense}
+										<li>
+											{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_type})
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					</div>
+				{/if}
 			{/if}
 		</div>
 
@@ -396,5 +444,75 @@
 		font-size: 0.9em;
 		color: #666;
 		flex-wrap: wrap;
+	}
+
+	/* Modal styles */
+	.modal-bg {
+		position: fixed;
+		top: 0;
+		left: 0;
+		width: 100vw;
+		height: 100vh;
+		background: rgba(0, 0, 0, 0.3);
+		z-index: 100;
+	}
+
+	.participant-modal {
+		position: fixed;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		background: white;
+		padding: 30px;
+		border-radius: 15px;
+		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+		z-index: 101;
+		min-width: 320px;
+		max-width: 90vw;
+		max-height: 80vh;
+		overflow-y: auto;
+	}
+
+	.participant-modal h3 {
+		margin-top: 0;
+		margin-bottom: 10px;
+	}
+
+	.participant-section {
+		margin-bottom: 20px;
+	}
+
+	.participant-section h4 {
+		margin-bottom: 10px;
+		color: #667eea;
+	}
+
+	.participant-section ul {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+	}
+
+	.participant-section li {
+		padding: 8px 12px;
+		background: #f8f9fa;
+		border-radius: 6px;
+		margin-bottom: 8px;
+	}
+
+	.close-btn {
+		float: right;
+		background: #667eea;
+		color: white;
+		border: none;
+		border-radius: 8px;
+		padding: 6px 16px;
+		font-size: 1em;
+		cursor: pointer;
+		margin-bottom: 10px;
+	}
+
+	.close-btn:hover {
+		background: #5568d3;
 	}
 </style>
