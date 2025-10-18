@@ -110,9 +110,29 @@
 		}).format(amount);
 	}
 
+
 	function openParticipantDetails(person) {
 		selectedParticipant = person;
 		showParticipantDetails = true;
+	}
+
+	function getParticipantPayments(person) {
+		return expenses.filter(e => e.x_studio_who_paid === person);
+	}
+
+	function getParticipantExpenses(person) {
+		return expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(person));
+	}
+
+	function getSumPayments(person) {
+		return getParticipantPayments(person).reduce((sum, e) => sum + (e.x_studio_value || 0), 0);
+	}
+
+	function getSumIndividualShares(person) {
+		return getParticipantExpenses(person).reduce((sum, e) => {
+			const n = Array.isArray(e.x_studio_participants) ? e.x_studio_participants.length : 0;
+			return sum + (n > 0 ? (e.x_studio_value || 0) / n : 0);
+		}, 0);
 	}
 
 	function closeParticipantDetails() {
@@ -160,21 +180,29 @@
 					{/each}
 				</div>
 
-				{#if showParticipantDetails}
-					<div class="modal-bg" on:click={closeParticipantDetails}></div>
-					<div class="participant-modal">
-						<h3>Details for <span class="person">{selectedParticipant}</span></h3>
-						<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
-						<div class="participant-section">
+					{#if showParticipantDetails}
+						<div class="modal-bg" on:click={closeParticipantDetails}></div>
+						<div class="participant-modal">
+							<h3>Details for <span class="person">{selectedParticipant}</span></h3>
+							<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
+
+							<!-- Summary Section -->
+							<div class="participant-summary">
+								<p><strong>Total Payments:</strong> {formatCurrency(getSumPayments(selectedParticipant))}</p>
+								<p><strong>Total Individual Expense:</strong> {formatCurrency(getSumIndividualShares(selectedParticipant))}</p>
+								<p><strong>Net Balance:</strong> {formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}</p>
+							</div>
+
+							<div class="participant-section">
 							<h4>Payments made by {selectedParticipant}</h4>
 							{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
 								<p class="empty">No payments made by this participant.</p>
 							{:else}
 								<ul>
 									{#each expenses.filter(e => e.x_studio_who_paid === selectedParticipant) as expense}
-										<li>
-											{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_type})
-										</li>
+																	<li>
+																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} 
+																	</li>
 									{/each}
 								</ul>
 							{/if}
@@ -186,9 +214,9 @@
 							{:else}
 								<ul>
 									{#each expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)) as expense}
-										<li>
-											{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_type})
-										</li>
+																	<li>
+																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({formatCurrency(expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0)})
+																	</li>
 									{/each}
 								</ul>
 							{/if}
