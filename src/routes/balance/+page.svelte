@@ -238,6 +238,7 @@
 								<span class="expense-amount">{formatCurrency(expense.x_studio_value)}</span>
 							</div>
 							<div class="expense-details">
+								<span>Date: <strong>{expense.x_studio_date}</strong></span>
 								<span>Paid by: <strong>{expense.x_studio_who_paid}</strong></span>
 								<span>Split: {expense.x_studio_participants}</span>
 							</div>
