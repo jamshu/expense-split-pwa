@@ -1,13 +1,12 @@
 <script>
 	import { onMount } from 'svelte';
 	import { odooClient } from '$lib/odoo';
-	import { calculateBalances, calculateSettlements } from '$lib/expenseUtils';
+	import { calculateBalances } from '$lib/expenseUtils';
 
 	let loading = true;
 	let error = '';
 	let expenses = [];
 	let balances = {};
-	let settlements = [];
 
 	let selectedParticipant = '';
 	let showParticipantDetails = false;
@@ -95,7 +94,6 @@
 			}
 
 			balances = calculateBalances(expenses);
-			settlements = calculateSettlements(balances);
 		} catch (err) {
 			error = err.message;
 		} finally {
@@ -227,25 +225,6 @@
 		</div>
 
 		<div class="report-card">
-			<h2>🔄 Settlement Plan</h2>
-			{#if settlements.length === 0}
-				<p class="empty">All balanced! No settlements needed.</p>
-			{:else}
-				<div class="settlement-list">
-					{#each settlements as settlement}
-						<div class="settlement-item">
-							<div class="settlement-text">
-								<strong>{settlement.from}</strong> pays
-								<strong>{settlement.to}</strong>
-							</div>
-							<div class="settlement-amount">{formatCurrency(settlement.amount)}</div>
-						</div>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<div class="report-card">
 			<h2>📝 Recent Expenses</h2>
 			{#if expenses.length === 0}
 				<p class="empty">No expenses recorded yet.</p>
@@ -352,7 +331,6 @@
 	}
 
 	.balance-list,
-	.settlement-list,
 	.expense-list {
 		display: flex;
 		flex-direction: column;
@@ -415,26 +393,6 @@
 	.badge.gray {
 		background: #e0e0e0;
 		color: #616161;
-	}
-
-	.settlement-item {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: 15px;
-		background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
-		border-radius: 10px;
-		border-left: 4px solid #667eea;
-	}
-
-	.settlement-text {
-		color: #333;
-	}
-
-	.settlement-amount {
-		font-weight: 700;
-		font-size: 1.2em;
-		color: #667eea;
 	}
 
 	.expense-item {
