@@ -2,7 +2,7 @@
 	"name": "Expense Split",
 	"short_name": "Expense Split",
 	"description": "Split grocery and hotel bills with roommates",
-	"start_url": "/expense-split-pwa/",
+	"start_url": "/",
 	"display": "standalone",
 	"background_color": "#667eea",
 	"theme_color": "#667eea",

@@ -11,6 +11,7 @@ export default defineConfig({
 				globPatterns: ['**/*.{js,css,html,ico,png,svg,json,webp}']
 			},
 			manifest: {
+				id: '/',
 				name: 'Expense Split',
 				short_name: 'Expense Split',
 				description: 'A PWA for splitting expenses',
