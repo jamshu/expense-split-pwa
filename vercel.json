@@ -1,4 +1,6 @@
 {
+  "outputDirectory": "public",
+ 
   "env": {
     "PUBLIC_BASE_PATH": "/expense-split-pwa"
   },
@@ -6,5 +8,11 @@
     "env": {
       "PUBLIC_BASE_PATH": "/expense-split-pwa"
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/expense-split-pwa/(.*)",
+      "destination": "/$1"
+    }
+  ]
 }
