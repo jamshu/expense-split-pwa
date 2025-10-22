@@ -170,52 +170,101 @@
 						</div>
 					{/each}
 				</div>
+			{/if}
+		</div>
 
-					{#if showParticipantDetails}
-						<div class="modal-bg" on:click={closeParticipantDetails}></div>
-						<div class="participant-modal">
-							<h3>Details for <span class="person">{selectedParticipant}</span></h3>
-							<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
+		{#if showParticipantDetails}
+			<div class="modal-bg" on:click={closeParticipantDetails}></div>
+			<div class="participant-modal">
+				<h3>Details for <span class="person">{selectedParticipant}</span></h3>
+				<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
 
-							<!-- Summary Section -->
-							<div class="participant-summary">
-								<p><strong>Total Payments:</strong> {formatCurrency(getSumPayments(selectedParticipant))}</p>
-								<p><strong>Total Individual Expense:</strong> {formatCurrency(getSumIndividualShares(selectedParticipant))}</p>
-								<p><strong>Net Balance:</strong> {formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}</p>
-							</div>
-
-							<div class="participant-section">
-							<h4>Payments made by {selectedParticipant}</h4>
-							{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
-								<p class="empty">No payments made by this participant.</p>
-							{:else}
-													<ul>
-														{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
-																	<li>
-																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_date})
-																	</li>
-									{/each}
-								</ul>
-							{/if}
+				<!-- Summary Section -->
+				<div class="participant-summary">
+					<div class="summary-grid">
+						<div><strong>Total Credits (Owed to {selectedParticipant}):</strong></div>
+						<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant))}</div>
+						
+						<div><strong>Total Debits (Owed by {selectedParticipant}):</strong></div>
+						<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</div>
+						
+						<div class="net-balance"><strong>Net Balance:</strong></div>
+						<div class="amount {getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant) >= 0 ? 'green' : 'red'}">
+							{formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}
 						</div>
-						<div class="participant-section">
-							<h4>Expenses including {selectedParticipant}</h4>
-							{#if expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length === 0}
-								<p class="empty">No expenses include this participant.</p>
-							{:else}
-													<ul>
-														{#each [...expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
-																	<li>
-																		{expense.x_name} — {formatCurrency(expense.x_studio_value)} ({expense.x_studio_date},{formatCurrency(expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0)})
-																	</li>
+					</div>
+				</div>
+
+				<div class="participant-section">
+					<h4>Credits (Amount Owed to {selectedParticipant})</h4>
+					{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
+						<p class="empty">No credits for this participant.</p>
+					{:else}
+						<div class="table-container">
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Date</th>
+										<th>Description</th>
+										<th class="text-right">Amount</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
+										<tr>
+											<td>{expense.x_studio_date}</td>
+											<td>{expense.x_name}</td>
+											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
+										</tr>
 									{/each}
-								</ul>
-							{/if}
+								</tbody>
+								<tfoot>
+									<tr class="total-row">
+										<td colspan="2" class="text-right"><strong>Total Credits:</strong></td>
+										<td class="text-right"><strong class="green">{formatCurrency(getSumPayments(selectedParticipant))}</strong></td>
+									</tr>
+								</tfoot>
+							</table>
+						</div>
+					{/if}
+				</div>
+
+				{#if expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length > 0}
+					<div class="participant-section">
+						<h4>Debits (Amount Owed by {selectedParticipant})</h4>
+						<div class="table-container">
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Date</th>
+										<th>Description</th>
+										<th class="text-right">Total</th>
+										<th class="text-right">Your Share</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each [...expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
+										{@const share = expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0}
+										<tr>
+											<td>{expense.x_studio_date}</td>
+											<td>{expense.x_name} (Paid by: {expense.x_studio_who_paid})</td>
+											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
+											<td class="text-right">{formatCurrency(share)}</td>
+										</tr>
+									{/each}
+								</tbody>
+								<tfoot>
+									<tr class="total-row">
+										<td colspan="3" class="text-right"><strong>Total Debits:</strong></td>
+										<td class="text-right"><strong class="red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</strong></td>
+									</tr>
+								</tfoot>
+							</table>
 						</div>
 					</div>
 				{/if}
-			{/if}
-		</div>
+			</div>
+		{/if}
 
 		<div class="report-card">
 			<h2>📝 Recent Expenses</h2>
@@ -598,5 +647,61 @@
 		font-size: 0.85em;
 		white-space: nowrap;
 		pointer-events: none;
+	}
+
+	.participant-summary {
+		margin-bottom: 20px;
+		padding: 15px;
+		background: #f8f9fa;
+		border-radius: 10px;
+	}
+
+	.summary-grid {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		gap: 10px;
+		align-items: center;
+	}
+
+	.net-balance {
+		padding-top: 10px;
+		border-top: 2px solid #ddd;
+		margin-top: 10px;
+	}
+
+	.table-container {
+		overflow-x: auto;
+	}
+
+	.data-table {
+		width: 100%;
+		border-collapse: collapse;
+		margin-top: 10px;
+	}
+
+	.data-table th,
+	.data-table td {
+		padding: 10px;
+		text-align: left;
+		border-bottom: 1px solid #e0e0e0;
+	}
+
+	.data-table th {
+		background: #f5f5f5;
+		font-weight: 600;
+		color: #333;
+	}
+
+	.data-table .text-right {
+		text-align: right;
+	}
+
+	.data-table tfoot {
+		border-top: 2px solid #ddd;
+	}
+
+	.total-row td {
+		padding-top: 15px;
+		font-weight: 600;
 	}
 </style>
