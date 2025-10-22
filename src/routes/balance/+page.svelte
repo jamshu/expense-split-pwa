@@ -1,190 +1,65 @@
 <script>
-	import { onMount } from 'svelte';
-	import { odooClient } from '$lib/odoo';
-	import { calculateBalances } from '$lib/expenseUtils';
-
-	let loading = true;
-	let error = '';
+	import { onMount, onDestroy } from 'svelte';
+	import { expenseCache, recentExpenses, cacheStatus } from '$lib/stores/expenseCache';
+	
+	// Subscribe to cache store
 	let expenses = [];
 	let balances = {};
-
+	let loading = false;
+	let syncing = false;
+	let error = '';
+	let lastSync = 0;
+	let isStale = false;
+	
 	let selectedParticipant = '';
 	let showParticipantDetails = false;
-
-	// --- New: client-side cache keys & helpers ---
-	const STORAGE_KEY = 'x_expenses_cache';
-	const LAST_ID_KEY = 'x_expenses_last_id';
-
-	function loadCachedExpenses() {
-		try {
-			const raw = localStorage.getItem(STORAGE_KEY);
-			return raw ? JSON.parse(raw) : [];
-		} catch (e) {
-			console.warn('Failed to parse cached expenses', e);
-			return [];
-		}
-	}
-
-	function saveCachedExpenses(arr) {
-		try {
-			localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
-			const maxId = arr.length ? Math.max(...arr.map((r) => Number(r.id || 0))) : 0;
-			if (maxId > 0) localStorage.setItem(LAST_ID_KEY, String(maxId));
-		} catch (e) {
-			console.warn('Failed to save cached expenses', e);
-		}
-	}
-
-	function getCachedLastId() {
-		try {
-			const v = localStorage.getItem(LAST_ID_KEY);
-			return v ? Number(v) : null;
-		} catch {
-			return null;
-		}
-	}
-	// --- end cache helpers ---
-
-	onMount(async () => {
-		try {
-			loading = true;
-			error = '';
-
-			// Fields must include 'id' so we can track last_record_id locally
-			const fields = [
-				'id',
-				'x_name',
-				'x_studio_value',
-				'x_studio_who_paid',
-				'x_studio_participants',
-				'x_studio_type',
-				'x_studio_date'
-			];
-
-			// Load cached expenses (if any)
-			const cached = loadCachedExpenses();
-			console.log(`Loaded ${cached.length} cached expenses`);
-			const localLastId = cached.length ? Math.max(...cached.map(r => Number(r.id || 0))) : null;
-
-			// Build domain: if we have a local last id, only request records with id > lastId
-			const domain = localLastId ? [['id', '>', localLastId]] : [];
-
-			// Fetch new records from Odoo (if domain empty this will fetch full dataset)
-			let fetched = [];
-			try {
-				fetched = await odooClient.searchExpenses(domain, fields);
-			} catch (fetchErr) {
-				// if fetching with last_id failed, fallback to full fetch
-				console.warn('Incremental fetch failed, trying full fetch', fetchErr);
-				try {
-					fetched = await odooClient.searchExpenses([], fields);
-				} catch (fullErr) {
-					throw fullErr;
-				}
-			}
-
-			// Merge cached + fetched intelligently:
-			if (localLastId && Array.isArray(fetched) && fetched.length > 0) {
-				// append newer records
-				expenses = [...cached, ...fetched];
-			} else if (!localLastId) {
-				// no cache present — use the fetched full dataset
-				expenses = fetched || [];
-			} else {
-				// no new records; use cached
-				expenses = cached;
-			}
-
-			// If we still have no local cache but found no fetched items (edge-case), ensure we request full data
-			if (!localLastId && (!Array.isArray(expenses) || expenses.length === 0)) {
-				// nothing returned; keep expenses empty
-				expenses = [];
-			}
-
-			// Persist merged cache
-			saveCachedExpenses(expenses);
-
-			// Resolve partner ids to display names so the report shows names (not raw ids)
-			try {
-				// collect partner ids from who_paid and participants
-				const partnerIds = new Set();
-				for (const e of expenses) {
-					// who_paid: could be [id, name], object, or id
-					if (Array.isArray(e.x_studio_who_paid) && e.x_studio_who_paid.length > 0) {
-						partnerIds.add(Number(e.x_studio_who_paid[0]));
-					} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'number') {
-						partnerIds.add(Number(e.x_studio_who_paid));
-					} else if (e.x_studio_who_paid && typeof e.x_studio_who_paid === 'string' && /^\d+$/.test(e.x_studio_who_paid)) {
-						partnerIds.add(Number(e.x_studio_who_paid));
-					}
-
-					// participants: may be array of ids, array of tuples, or comma string
-					const parts = e.x_studio_participants;
-					if (Array.isArray(parts)) {
-						for (const p of parts) {
-							if (Array.isArray(p) && p.length > 0) partnerIds.add(Number(p[0]));
-							else if (typeof p === 'number') partnerIds.add(Number(p));
-							else if (typeof p === 'string' && /^\d+$/.test(p)) partnerIds.add(Number(p));
-						}
-					}
-				}
-
-				if (partnerIds.size > 0) {
-					const ids = Array.from(partnerIds);
-					const partners = await odooClient.searchModel('res.partner', [['id', 'in', ids]], ['id', 'display_name']);
-					const partnerMap = new Map(partners.map((p) => [Number(p.id), p.display_name]));
-
-					// replace ids in expenses with display names where possible
-					expenses = expenses.map((e) => {
-						const copy = { ...e };
-						// who_paid
-						if (Array.isArray(copy.x_studio_who_paid) && copy.x_studio_who_paid.length > 0) {
-							const id = Number(copy.x_studio_who_paid[0]);
-							copy.x_studio_who_paid = partnerMap.get(id) || String(copy.x_studio_who_paid[1] || id);
-						} else if (typeof copy.x_studio_who_paid === 'number' || (typeof copy.x_studio_who_paid === 'string' && /^\d+$/.test(copy.x_studio_who_paid))) {
-							const id = Number(copy.x_studio_who_paid);
-							copy.x_studio_who_paid = partnerMap.get(id) || String(id);
-						}
-
-						// participants
-						const parts = copy.x_studio_participants;
-						if (Array.isArray(parts)) {
-							const names = [];
-							for (const p of parts) {
-								if (Array.isArray(p) && p.length > 0) {
-									const id = Number(p[0]);
-									names.push(partnerMap.get(id) || String(p[1] || id));
-								} else if (typeof p === 'number' || (typeof p === 'string' && /^\d+$/.test(p))) {
-									const id = Number(p);
-									names.push(partnerMap.get(id) || String(id));
-								} else if (typeof p === 'object' && p) {
-									names.push(String(p.display_name || p.name || p.id || JSON.stringify(p)));
-								} else {
-									names.push(String(p));
-								}
-							}
-							copy.x_studio_participants = names;
-						} else if (typeof parts === 'string') {
-							// leave as-is (comma-separated names)
-						}
-
-						return copy;
-					});
-
-					// Persist cache again now that we've normalized names
-					saveCachedExpenses(expenses);
-				}
-			} catch (mapErr) {
-				console.warn('Failed to map partner ids to names', mapErr);
-			}
-
-			balances = calculateBalances(expenses);
-		} catch (err) {
-			error = err.message;
-		} finally {
-			loading = false;
-		}
+	let showRefreshTooltip = false;
+	
+	// Subscribe to cache updates
+	const unsubscribeCache = expenseCache.subscribe($cache => {
+		expenses = $cache.expenses;
+		balances = $cache.balances;
+		loading = $cache.loading;
+		error = $cache.error;
 	});
+	
+	const unsubscribeStatus = cacheStatus.subscribe($status => {
+		syncing = $status.isSyncing;
+		lastSync = $status.lastSync;
+		isStale = $status.isStale;
+	});
+	
+	onMount(async () => {
+		// Initialize cache store - will show cached data immediately
+		// and sync in background if needed
+		await expenseCache.initialize();
+	});
+	
+	onDestroy(() => {
+		// Clean up subscriptions and background sync
+		unsubscribeCache();
+		unsubscribeStatus();
+		expenseCache.destroy();
+	});
+	
+	// Manual refresh function
+	async function handleRefresh() {
+		showRefreshTooltip = false;
+		await expenseCache.forceRefresh();
+	}
+	
+	// Format last sync time
+	function formatLastSync(timestamp) {
+		if (!timestamp) return 'Never';
+		
+		const now = Date.now();
+		const diff = now - timestamp;
+		
+		if (diff < 60000) return 'Just now';
+		if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+		if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+		return `${Math.floor(diff / 86400000)}d ago`;
+	}
 
 	function formatCurrency(amount) {
 		return new Intl.NumberFormat('en-US', {
@@ -229,6 +104,39 @@
 
 <div class="container">
 	<h1>📊 Balance Report</h1>
+	
+	<!-- Cache Status Bar -->
+	<div class="cache-status-bar">
+		<div class="cache-info">
+			{#if syncing}
+				<span class="sync-indicator">
+					<span class="sync-spinner"></span>
+					Syncing...
+				</span>
+			{:else if isStale}
+				<span class="cache-badge stale">⚠️ Stale cache</span>
+			{:else}
+				<span class="cache-badge fresh">✓ Up to date</span>
+			{/if}
+			
+			<span class="last-sync">
+				Last sync: {formatLastSync(lastSync)}
+			</span>
+		</div>
+		
+		<button 
+			class="refresh-btn" 
+			on:click={handleRefresh}
+			on:mouseenter={() => showRefreshTooltip = true}
+			on:mouseleave={() => showRefreshTooltip = false}
+			disabled={syncing}
+		>
+			🔄
+			{#if showRefreshTooltip}
+				<span class="tooltip">Force refresh</span>
+			{/if}
+		</button>
+	</div>
 
 	<nav>
 		<a href="/">Add Expense</a>
@@ -586,5 +494,109 @@
 
 	.close-btn:hover {
 		background: #5568d3;
+	}
+	
+	/* Cache status bar styles */
+	.cache-status-bar {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		background: rgba(255, 255, 255, 0.95);
+		padding: 10px 15px;
+		border-radius: 10px;
+		margin-bottom: 20px;
+		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+	}
+	
+	.cache-info {
+		display: flex;
+		align-items: center;
+		gap: 15px;
+		font-size: 0.9em;
+	}
+	
+	.cache-badge {
+		padding: 4px 10px;
+		border-radius: 12px;
+		font-weight: 600;
+		font-size: 0.85em;
+	}
+	
+	.cache-badge.fresh {
+		background: #e8f5e9;
+		color: #2e7d32;
+	}
+	
+	.cache-badge.stale {
+		background: #fff3e0;
+		color: #ef6c00;
+	}
+	
+	.sync-indicator {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: #667eea;
+		font-weight: 600;
+	}
+	
+	.sync-spinner {
+		display: inline-block;
+		width: 14px;
+		height: 14px;
+		border: 2px solid rgba(102, 126, 234, 0.3);
+		border-top-color: #667eea;
+		border-radius: 50%;
+		animation: spin 0.8s linear infinite;
+	}
+	
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+	
+	.last-sync {
+		color: #666;
+		font-size: 0.9em;
+	}
+	
+	.refresh-btn {
+		position: relative;
+		background: #667eea;
+		color: white;
+		border: none;
+		border-radius: 50%;
+		width: 36px;
+		height: 36px;
+		font-size: 1.2em;
+		cursor: pointer;
+		transition: all 0.3s;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	
+	.refresh-btn:hover:not(:disabled) {
+		background: #5568d3;
+		transform: rotate(180deg);
+	}
+	
+	.refresh-btn:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+	
+	.tooltip {
+		position: absolute;
+		top: -35px;
+		right: 0;
+		background: rgba(0, 0, 0, 0.8);
+		color: white;
+		padding: 5px 10px;
+		border-radius: 6px;
+		font-size: 0.85em;
+		white-space: nowrap;
+		pointer-events: none;
 	}
 </style>
