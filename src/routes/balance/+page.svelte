@@ -96,6 +96,12 @@
 	function closeParticipantDetails() {
 		showParticipantDetails = false;
 	}
+
+	function formatDate(dateString) {
+		if (!dateString) return '';
+		const date = new Date(dateString);
+		return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	}
 </script>
 
 <svelte:head>
@@ -176,24 +182,27 @@
 		{#if showParticipantDetails}
 			<div class="modal-bg" on:click={closeParticipantDetails}></div>
 			<div class="participant-modal">
-				<h3>Details for <span class="person">{selectedParticipant}</span></h3>
-				<button class="close-btn" on:click={closeParticipantDetails}>Close</button>
+				<div class="modal-header">
+					<h3>💼 Details for <span class="person">{selectedParticipant}</span></h3>
+					<button class="close-btn" on:click={closeParticipantDetails}>✕</button>
+				</div>
 
-				<!-- Summary Section -->
-				<div class="participant-summary">
-					<div class="summary-grid">
-						<div><strong>Total Credits (Owed to {selectedParticipant}):</strong></div>
-						<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant))}</div>
-						
-						<div><strong>Total Debits (Owed by {selectedParticipant}):</strong></div>
-						<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</div>
-						
-						<div class="net-balance"><strong>Net Balance:</strong></div>
-						<div class="amount {getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant) >= 0 ? 'green' : 'red'}">
-							{formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}
+				<div class="modal-content">
+					<!-- Summary Section -->
+					<div class="participant-summary">
+						<div class="summary-grid">
+							<div><strong>Total Credits (Owed to {selectedParticipant}):</strong></div>
+							<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant))}</div>
+							
+							<div><strong>Total Debits (Owed by {selectedParticipant}):</strong></div>
+							<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</div>
+							
+							<div class="net-balance"><strong>Net Balance:</strong></div>
+							<div class="amount {getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant) >= 0 ? 'green' : 'red'}">
+								{formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}
+							</div>
 						</div>
 					</div>
-				</div>
 
 				<div class="participant-section">
 					<h4>Credits (Amount Owed to {selectedParticipant})</h4>
@@ -212,7 +221,7 @@
 								<tbody>
 									{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
 										<tr>
-											<td>{expense.x_studio_date}</td>
+											<td>{formatDate(expense.x_studio_date)}</td>
 											<td>{expense.x_name}</td>
 											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
 										</tr>
@@ -246,7 +255,7 @@
 									{#each [...expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
 										{@const share = expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0}
 										<tr>
-											<td>{expense.x_studio_date}</td>
+											<td>{formatDate(expense.x_studio_date)}</td>
 											<td>{expense.x_name} (Paid by: {expense.x_studio_who_paid})</td>
 											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
 											<td class="text-right">{formatCurrency(share)}</td>
@@ -263,6 +272,7 @@
 						</div>
 					</div>
 				{/if}
+				</div>
 			</div>
 		{/if}
 
@@ -482,8 +492,30 @@
 		left: 0;
 		width: 100vw;
 		height: 100vh;
-		background: rgba(0, 0, 0, 0.3);
+		background: rgba(0, 0, 0, 0.5);
+		backdrop-filter: blur(4px);
 		z-index: 100;
+		animation: fadeIn 0.2s ease-out;
+	}
+
+	@keyframes fadeIn {
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
+	}
+
+	@keyframes slideUp {
+		from {
+			transform: translate(-50%, -40%);
+			opacity: 0;
+		}
+		to {
+			transform: translate(-50%, -50%);
+			opacity: 1;
+		}
 	}
 
 	.participant-modal {
@@ -492,19 +524,43 @@
 		left: 50%;
 		transform: translate(-50%, -50%);
 		background: white;
-		padding: 30px;
-		border-radius: 15px;
-		box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+		padding: 0;
+		border-radius: 20px;
+		box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
 		z-index: 101;
-		min-width: 320px;
+		min-width: 400px;
 		max-width: 90vw;
-		max-height: 80vh;
-		overflow-y: auto;
+		max-height: 85vh;
+		overflow: hidden;
+		animation: slideUp 0.3s ease-out;
 	}
 
-	.participant-modal h3 {
-		margin-top: 0;
-		margin-bottom: 10px;
+	.modal-header {
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: white;
+		padding: 25px 30px;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		border-radius: 20px 20px 0 0;
+	}
+
+	.modal-header h3 {
+		margin: 0;
+		font-size: 1.5em;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.modal-header .person {
+		color: white;
+	}
+
+	.modal-content {
+		max-height: calc(85vh - 80px);
+		overflow-y: auto;
+		padding: 20px 30px 30px 30px;
 	}
 
 	.participant-section {
@@ -530,19 +586,24 @@
 	}
 
 	.close-btn {
-		float: right;
-		background: #667eea;
+		background: rgba(255, 255, 255, 0.2);
 		color: white;
-		border: none;
-		border-radius: 8px;
-		padding: 6px 16px;
-		font-size: 1em;
+		border: 2px solid rgba(255, 255, 255, 0.3);
+		border-radius: 50%;
+		width: 36px;
+		height: 36px;
+		font-size: 1.2em;
 		cursor: pointer;
-		margin-bottom: 10px;
+		transition: all 0.3s;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0;
 	}
 
 	.close-btn:hover {
-		background: #5568d3;
+		background: rgba(255, 255, 255, 0.3);
+		transform: rotate(90deg);
 	}
 	
 	/* Cache status bar styles */
