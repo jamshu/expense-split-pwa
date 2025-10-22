@@ -11,16 +11,98 @@
 	let selectedParticipant = '';
 	let showParticipantDetails = false;
 
+	// --- New: client-side cache keys & helpers ---
+	const STORAGE_KEY = 'x_expenses_cache';
+	const LAST_ID_KEY = 'x_expenses_last_id';
+
+	function loadCachedExpenses() {
+		try {
+			const raw = localStorage.getItem(STORAGE_KEY);
+			return raw ? JSON.parse(raw) : [];
+		} catch (e) {
+			console.warn('Failed to parse cached expenses', e);
+			return [];
+		}
+	}
+
+	function saveCachedExpenses(arr) {
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+			const maxId = arr.length ? Math.max(...arr.map((r) => Number(r.id || 0))) : 0;
+			if (maxId > 0) localStorage.setItem(LAST_ID_KEY, String(maxId));
+		} catch (e) {
+			console.warn('Failed to save cached expenses', e);
+		}
+	}
+
+	function getCachedLastId() {
+		try {
+			const v = localStorage.getItem(LAST_ID_KEY);
+			return v ? Number(v) : null;
+		} catch {
+			return null;
+		}
+	}
+	// --- end cache helpers ---
+
 	onMount(async () => {
 		try {
-			expenses = await odooClient.searchExpenses([], [
+			loading = true;
+			error = '';
+
+			// Fields must include 'id' so we can track last_record_id locally
+			const fields = [
+				'id',
 				'x_name',
 				'x_studio_value',
 				'x_studio_who_paid',
 				'x_studio_participants',
 				'x_studio_type',
 				'x_studio_date'
-			]);
+			];
+
+			// Load cached expenses (if any)
+			const cached = loadCachedExpenses();
+			console.log(`Loaded ${cached.length} cached expenses`);
+			const localLastId = cached.length ? Math.max(...cached.map(r => Number(r.id || 0))) : null;
+
+			// Build domain: if we have a local last id, only request records with id > lastId
+			const domain = localLastId ? [['id', '>', localLastId]] : [];
+
+			// Fetch new records from Odoo (if domain empty this will fetch full dataset)
+			let fetched = [];
+			try {
+				fetched = await odooClient.searchExpenses(domain, fields);
+			} catch (fetchErr) {
+				// if fetching with last_id failed, fallback to full fetch
+				console.warn('Incremental fetch failed, trying full fetch', fetchErr);
+				try {
+					fetched = await odooClient.searchExpenses([], fields);
+				} catch (fullErr) {
+					throw fullErr;
+				}
+			}
+
+			// Merge cached + fetched intelligently:
+			if (localLastId && Array.isArray(fetched) && fetched.length > 0) {
+				// append newer records
+				expenses = [...cached, ...fetched];
+			} else if (!localLastId) {
+				// no cache present — use the fetched full dataset
+				expenses = fetched || [];
+			} else {
+				// no new records; use cached
+				expenses = cached;
+			}
+
+			// If we still have no local cache but found no fetched items (edge-case), ensure we request full data
+			if (!localLastId && (!Array.isArray(expenses) || expenses.length === 0)) {
+				// nothing returned; keep expenses empty
+				expenses = [];
+			}
+
+			// Persist merged cache
+			saveCachedExpenses(expenses);
 
 			// Resolve partner ids to display names so the report shows names (not raw ids)
 			try {
@@ -88,6 +170,9 @@
 
 						return copy;
 					});
+
+					// Persist cache again now that we've normalized names
+					saveCachedExpenses(expenses);
 				}
 			} catch (mapErr) {
 				console.warn('Failed to map partner ids to names', mapErr);
