@@ -7,7 +7,7 @@ import { calculateBalances } from '$lib/expenseUtils';
 const CACHE_KEY = 'expense_cache_v2';
 const CACHE_META_KEY = 'expense_cache_meta';
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes cache validity
-const SYNC_INTERVAL_MS = 15 * 1000; // Background sync every 15 seconds
+const SYNC_INTERVAL_MS = 10 * 1000; // Background sync every 10 seconds
 
 /**
  * @typedef {Object} ExpenseRecord
