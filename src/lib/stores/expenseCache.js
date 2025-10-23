@@ -18,6 +18,7 @@ const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
  * @property {any} x_studio_participants
  * @property {string} x_studio_type
  * @property {string} x_studio_date
+ * @property {boolean} [x_studio_is_done]
  */
 
 /**
@@ -200,7 +201,8 @@ function createExpenseCacheStore() {
 				'x_studio_who_paid',
 				'x_studio_participants',
 				'x_studio_type',
-				'x_studio_date'
+				'x_studio_date',
+				'x_studio_is_done'
 			];
 			
 			let currentState;

@@ -74,23 +74,39 @@
 		showParticipantDetails = true;
 	}
 
-	function getParticipantPayments(person) {
-		return expenses.filter(e => e.x_studio_who_paid === person);
+	// Filter expenses by settlement status
+	function getSettledExpenses() {
+		return expenses.filter(e => e.x_studio_is_done === true);
 	}
 
-	function getParticipantExpenses(person) {
-		return expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(person));
+	function getUnsettledExpenses() {
+		return expenses.filter(e => e.x_studio_is_done !== true);
 	}
 
-	function getSumPayments(person) {
-		return getParticipantPayments(person).reduce((sum, e) => sum + (e.x_studio_value || 0), 0);
+	function getParticipantPayments(person, settled = false) {
+		const expenseList = settled ? getSettledExpenses() : getUnsettledExpenses();
+		return expenseList.filter(e => e.x_studio_who_paid === person);
 	}
 
-	function getSumIndividualShares(person) {
-		return getParticipantExpenses(person).reduce((sum, e) => {
+	function getParticipantExpenses(person, settled = false) {
+		const expenseList = settled ? getSettledExpenses() : getUnsettledExpenses();
+		return expenseList.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(person));
+	}
+
+	function getSumPayments(person, settled = false) {
+		return getParticipantPayments(person, settled).reduce((sum, e) => sum + (e.x_studio_value || 0), 0);
+	}
+
+	function getSumIndividualShares(person, settled = false) {
+		return getParticipantExpenses(person, settled).reduce((sum, e) => {
 			const n = Array.isArray(e.x_studio_participants) ? e.x_studio_participants.length : 0;
 			return sum + (n > 0 ? (e.x_studio_value || 0) / n : 0);
 		}, 0);
+	}
+
+	// Calculate opening balance from settled expenses
+	function getOpeningBalance(person) {
+		return getSumPayments(person, true) - getSumIndividualShares(person, true);
 	}
 
 	function closeParticipantDetails() {
@@ -191,23 +207,30 @@
 					<!-- Summary Section -->
 					<div class="participant-summary">
 						<div class="summary-grid">
-							<div><strong>Total Credits (Owed to {selectedParticipant}):</strong></div>
-							<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant))}</div>
+							{#if getOpeningBalance(selectedParticipant) !== 0}
+								<div><strong>Opening Balance (from settled):</strong></div>
+								<div class="amount {getOpeningBalance(selectedParticipant) >= 0 ? 'green' : 'red'}">
+									{formatCurrency(getOpeningBalance(selectedParticipant))}
+								</div>
+							{/if}
 							
-							<div><strong>Total Debits (Owed by {selectedParticipant}):</strong></div>
-							<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</div>
+							<div><strong>Current Credits (Owed to {selectedParticipant}):</strong></div>
+							<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant, false))}</div>
+							
+							<div><strong>Current Debits (Owed by {selectedParticipant}):</strong></div>
+							<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant, false))}</div>
 							
 							<div class="net-balance"><strong>Net Balance:</strong></div>
-							<div class="amount {getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant) >= 0 ? 'green' : 'red'}">
-								{formatCurrency(getSumPayments(selectedParticipant) - getSumIndividualShares(selectedParticipant))}
+							<div class="amount {getSumPayments(selectedParticipant, false) - getSumIndividualShares(selectedParticipant, false) + getOpeningBalance(selectedParticipant) >= 0 ? 'green' : 'red'}">
+								{formatCurrency(getSumPayments(selectedParticipant, false) - getSumIndividualShares(selectedParticipant, false) + getOpeningBalance(selectedParticipant))}
 							</div>
 						</div>
 					</div>
 
 				<div class="participant-section">
 					<h4>Credits (Amount Owed to {selectedParticipant})</h4>
-					{#if expenses.filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
-						<p class="empty">No credits for this participant.</p>
+					{#if getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
+						<p class="empty">No current credits for this participant.</p>
 					{:else}
 						<div class="table-container">
 							<table class="data-table">
@@ -219,7 +242,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each [...expenses.filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
+									{#each [...getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
 										<tr>
 											<td>{formatDate(expense.x_studio_date)}</td>
 											<td>{expense.x_name}</td>
@@ -230,7 +253,7 @@
 								<tfoot>
 									<tr class="total-row">
 										<td colspan="2" class="text-right"><strong>Total Credits:</strong></td>
-										<td class="text-right"><strong class="green">{formatCurrency(getSumPayments(selectedParticipant))}</strong></td>
+										<td class="text-right"><strong class="green">{formatCurrency(getSumPayments(selectedParticipant, false))}</strong></td>
 									</tr>
 								</tfoot>
 							</table>
@@ -238,7 +261,7 @@
 					{/if}
 				</div>
 
-				{#if expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length > 0}
+				{#if getUnsettledExpenses().filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length > 0}
 					<div class="participant-section">
 						<h4>Debits (Amount Owed by {selectedParticipant})</h4>
 						<div class="table-container">
@@ -252,7 +275,7 @@
 									</tr>
 								</thead>
 								<tbody>
-									{#each [...expenses.filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
+									{#each [...getUnsettledExpenses().filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant))].reverse() as expense}
 										{@const share = expense.x_studio_participants && Array.isArray(expense.x_studio_participants) && expense.x_studio_participants.length > 0 ? expense.x_studio_value / expense.x_studio_participants.length : 0}
 										<tr>
 											<td>{formatDate(expense.x_studio_date)}</td>
@@ -265,7 +288,7 @@
 								<tfoot>
 									<tr class="total-row">
 										<td colspan="3" class="text-right"><strong>Total Debits:</strong></td>
-										<td class="text-right"><strong class="red">-{formatCurrency(getSumIndividualShares(selectedParticipant))}</strong></td>
+										<td class="text-right"><strong class="red">-{formatCurrency(getSumIndividualShares(selectedParticipant, false))}</strong></td>
 									</tr>
 								</tfoot>
 							</table>
@@ -277,12 +300,12 @@
 		{/if}
 
 		<div class="report-card">
-			<h2>📝 Recent Expenses</h2>
-			{#if expenses.length === 0}
-				<p class="empty">No expenses recorded yet.</p>
+			<h2>📝 Recent Unsettled Expenses</h2>
+			{#if getUnsettledExpenses().length === 0}
+				<p class="empty">No unsettled expenses.</p>
 			{:else}
 				<div class="expense-list">
-					{#each expenses.slice(-10).reverse() as expense}
+					{#each getUnsettledExpenses().slice(-10).reverse() as expense}
 						<div class="expense-item">
 							<div class="expense-header">
 								<span class="expense-type">{expense.x_studio_type === 'grocery' ? '🛒' : expense.x_studio_type === 'hotel' ? '🏨' : '📦'}</span>

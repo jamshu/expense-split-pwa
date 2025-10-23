@@ -60,25 +60,47 @@ function normalizeParticipants(raw) {
 
 /**
  * Calculate balances from expenses
- * @param {Array<{x_studio_who_paid: any, x_studio_value: number, x_studio_participants: any}>} expenses
+ * @param {Array<{x_studio_who_paid: any, x_studio_value: number, x_studio_participants: any, x_studio_is_done?: boolean}>} expenses
  * @returns {Record<string, number>}
  */
 export function calculateBalances(expenses) {
 	/** @type {Record<string, number>} */
 	const balances = {};
 
-	for (const expense of expenses) {
+	// First, calculate opening balances from settled expenses
+	const settledExpenses = expenses.filter(e => e.x_studio_is_done === true);
+	const unsettledExpenses = expenses.filter(e => e.x_studio_is_done !== true);
+
+	// Process settled expenses to get opening balances
+	for (const expense of settledExpenses) {
 		const rawPayer = expense.x_studio_who_paid;
-	const amount = parseFloat(String(expense.x_studio_value || 0));
-
-		// Normalize payer to a display string (if it's [id, name] tuple use name,
-		// if it's a number or id string use that string; if it's an object fallback to toString)
+		const amount = parseFloat(String(expense.x_studio_value || 0));
 		const payer = normalizePerson(rawPayer);
+		const participants = normalizeParticipants(expense.x_studio_participants);
 
-		// Normalize participants which can be:
-		// - comma-separated string (legacy behavior)
-		// - array of ids: [1,2,3]
-		// - array of tuples: [[1, 'Alice'], [2, 'Bob']]
+		if (!payer || participants.length === 0 || amount <= 0) continue;
+
+		// Initialize balances
+		if (!balances[payer]) balances[payer] = 0;
+		participants.forEach((p) => {
+			if (!balances[p]) balances[p] = 0;
+		});
+
+		// Payer gets credited
+		balances[payer] += amount;
+
+		// Split amount among participants
+		const sharePerPerson = amount / participants.length;
+		participants.forEach((p) => {
+			balances[p] -= sharePerPerson;
+		});
+	}
+
+	// Now process unsettled expenses on top of opening balances
+	for (const expense of unsettledExpenses) {
+		const rawPayer = expense.x_studio_who_paid;
+		const amount = parseFloat(String(expense.x_studio_value || 0));
+		const payer = normalizePerson(rawPayer);
 		const participants = normalizeParticipants(expense.x_studio_participants);
 
 		if (!payer || participants.length === 0 || amount <= 0) continue;
