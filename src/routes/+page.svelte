@@ -1,5 +1,6 @@
 <script>
 	import { odooClient } from '$lib/odoo';
+	import { expenseCache } from '$lib/stores/expenseCache';
 	import { onMount } from 'svelte';
 
 	let description = '';
@@ -47,15 +48,18 @@
 				// set date on payload
 				payload.x_studio_date = new Date().toISOString().split('T')[0];
 
-				await odooClient.createExpense(payload);
+			await odooClient.createExpense(payload);
 
-			message = '✅ Expense added successfully!';
-			
-			// Reset form
-			description = '';
-			amount = '';
-			payer = '';
-			participants = [];
+		message = '✅ Expense added successfully!';
+		
+		// Immediately sync the expense cache to update balances
+		expenseCache.sync();
+		
+		// Reset form
+		description = '';
+		amount = '';
+		payer = '';
+		participants = [];
 		} catch (error) {
 			message = `❌ Error: ${error.message}`;
 		} finally {
