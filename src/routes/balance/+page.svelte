@@ -180,9 +180,9 @@ function handleGroupChange() {
 		}, 0);
 	}
 
-	// Calculate opening balance from settled expenses
+	// Calculate opening balance from settled expenses (debit - credit)
 	function getOpeningBalance(person) {
-		return getSumPayments(person, true) - getSumIndividualShares(person, true);
+		return getSumIndividualShares(person, true) - getSumPayments(person, true);
 	}
 
 	function closeParticipantDetails() {
@@ -394,14 +394,15 @@ function handleGroupChange() {
 			{:else}
 				<div class="balance-list">
 					{#each Object.entries(filteredBalances) as [person, balance]}
-						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0} on:click={() => openParticipantDetails(person)} on:keydown={(e) => e.key === 'Enter' && openParticipantDetails(person)} role="button" tabindex="0">
+						{@const debitCreditBalance = -balance}
+						<div class="balance-item" class:positive={debitCreditBalance > 0} class:negative={debitCreditBalance < 0} on:click={() => openParticipantDetails(person)} on:keydown={(e) => e.key === 'Enter' && openParticipantDetails(person)} role="button" tabindex="0">
 							<span class="person">{person}</span>
-							<span class="amount" class:green={balance > 0} class:red={balance < 0}>
-								{formatCurrency(Math.abs(balance))}
-								{#if balance > 0}
-									<span class="badge green">owed</span>
-								{:else if balance < 0}
+							<span class="amount" class:green={debitCreditBalance < 0} class:red={debitCreditBalance > 0}>
+								{formatCurrency(Math.abs(debitCreditBalance))}
+								{#if debitCreditBalance > 0}
 									<span class="badge red">owes</span>
+								{:else if debitCreditBalance < 0}
+									<span class="badge green">owed</span>
 								{:else}
 									<span class="badge gray">settled</span>
 								{/if}
@@ -423,64 +424,38 @@ function handleGroupChange() {
 				<div class="modal-content">
 					<!-- Summary Section -->
 					<div class="participant-summary">
-						<div class="summary-grid">
-							{#if getOpeningBalance(selectedParticipant) !== 0}
-								<div><strong>Opening Balance (from settled):</strong></div>
-								<div class="amount {getOpeningBalance(selectedParticipant) >= 0 ? 'green' : 'red'}">
-									{formatCurrency(getOpeningBalance(selectedParticipant))}
+						{#if selectedParticipant}
+							{@const openingBalance = getOpeningBalance(selectedParticipant)}
+							{@const currentDebits = getSumIndividualShares(selectedParticipant, false)}
+							{@const currentCredits = getSumPayments(selectedParticipant, false)}
+							{@const netBalance = currentDebits - currentCredits + openingBalance}
+							<div class="summary-grid">
+								{#if openingBalance !== 0}
+									<div><strong>Opening Balance (from settled):</strong></div>
+									<div class="amount {openingBalance < 0 ? 'green' : 'red'}">
+										{formatCurrency(Math.abs(openingBalance))}
+									</div>
+								{/if}
+								
+								<div><strong>Current Debits (Owed by {selectedParticipant}):</strong></div>
+								<div class="amount red">{formatCurrency(currentDebits)}</div>
+								
+								<div><strong>Current Credits (Owed to {selectedParticipant}):</strong></div>
+								<div class="amount green">-{formatCurrency(currentCredits)}</div>
+								
+								<div class="net-balance"><strong>Net Balance:</strong></div>
+								<div class="amount {netBalance < 0 ? 'green' : 'red'}">
+									{formatCurrency(Math.abs(netBalance))}
 								</div>
-							{/if}
-							
-							<div><strong>Current Credits (Owed to {selectedParticipant}):</strong></div>
-							<div class="amount green">{formatCurrency(getSumPayments(selectedParticipant, false))}</div>
-							
-							<div><strong>Current Debits (Owed by {selectedParticipant}):</strong></div>
-							<div class="amount red">-{formatCurrency(getSumIndividualShares(selectedParticipant, false))}</div>
-							
-							<div class="net-balance"><strong>Net Balance:</strong></div>
-							<div class="amount {getSumPayments(selectedParticipant, false) - getSumIndividualShares(selectedParticipant, false) + getOpeningBalance(selectedParticipant) >= 0 ? 'green' : 'red'}">
-								{formatCurrency(getSumPayments(selectedParticipant, false) - getSumIndividualShares(selectedParticipant, false) + getOpeningBalance(selectedParticipant))}
 							</div>
-						</div>
+						{/if}
 					</div>
 
 				<div class="participant-section">
-					<h4>Credits (Amount Owed to {selectedParticipant})</h4>
-					{#if getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant).length === 0}
-						<p class="empty">No current credits for this participant.</p>
+					<h4>Debits (Amount Owed by {selectedParticipant})</h4>
+					{#if getUnsettledExpenses().filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length === 0}
+						<p class="empty">No current debits for this participant.</p>
 					{:else}
-						<div class="table-container">
-							<table class="data-table">
-								<thead>
-									<tr>
-										<th>Date</th>
-										<th>Description</th>
-										<th class="text-right">Amount</th>
-									</tr>
-								</thead>
-								<tbody>
-									{#each [...getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
-										<tr>
-											<td>{formatDate(expense.x_studio_date)}</td>
-											<td>{expense.x_name}</td>
-											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
-										</tr>
-									{/each}
-								</tbody>
-								<tfoot>
-									<tr class="total-row">
-										<td colspan="2" class="text-right"><strong>Total Credits:</strong></td>
-										<td class="text-right"><strong class="green">{formatCurrency(getSumPayments(selectedParticipant, false))}</strong></td>
-									</tr>
-								</tfoot>
-							</table>
-						</div>
-					{/if}
-				</div>
-
-				{#if getUnsettledExpenses().filter(e => Array.isArray(e.x_studio_participants) && e.x_studio_participants.includes(selectedParticipant)).length > 0}
-					<div class="participant-section">
-						<h4>Debits (Amount Owed by {selectedParticipant})</h4>
 						<div class="table-container">
 							<table class="data-table">
 								<thead>
@@ -505,7 +480,39 @@ function handleGroupChange() {
 								<tfoot>
 									<tr class="total-row">
 										<td colspan="3" class="text-right"><strong>Total Debits:</strong></td>
-										<td class="text-right"><strong class="red">-{formatCurrency(getSumIndividualShares(selectedParticipant, false))}</strong></td>
+										<td class="text-right"><strong class="red">{formatCurrency(getSumIndividualShares(selectedParticipant, false))}</strong></td>
+									</tr>
+								</tfoot>
+							</table>
+						</div>
+					{/if}
+				</div>
+
+				{#if getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant).length > 0}
+					<div class="participant-section">
+						<h4>Credits (Amount Owed to {selectedParticipant})</h4>
+						<div class="table-container">
+							<table class="data-table">
+								<thead>
+									<tr>
+										<th>Date</th>
+										<th>Description</th>
+										<th class="text-right">Amount</th>
+									</tr>
+								</thead>
+								<tbody>
+									{#each [...getUnsettledExpenses().filter(e => e.x_studio_who_paid === selectedParticipant)].reverse() as expense}
+										<tr>
+											<td>{formatDate(expense.x_studio_date)}</td>
+											<td>{expense.x_name}</td>
+											<td class="text-right">{formatCurrency(expense.x_studio_value)}</td>
+										</tr>
+									{/each}
+								</tbody>
+								<tfoot>
+									<tr class="total-row">
+										<td colspan="2" class="text-right"><strong>Total Credits:</strong></td>
+										<td class="text-right"><strong class="green">-{formatCurrency(getSumPayments(selectedParticipant, false))}</strong></td>
 									</tr>
 								</tfoot>
 							</table>
