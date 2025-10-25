@@ -1,6 +1,7 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { expenseCache, recentExpenses, cacheStatus } from '$lib/stores/expenseCache';
+	import { defaultGroup } from '$lib/stores/defaultGroup';
 	import { odooClient } from '$lib/odoo';
 
 	// Subscribe to cache store
@@ -19,6 +20,7 @@
 	// Group selection
 	let expenseGroups = [];
 	let selectedGroup = null;
+	let showGroupSelector = false;
 	
 	// Subscribe to cache updates
 	const unsubscribeCache = expenseCache.subscribe($cache => {
@@ -39,10 +41,21 @@
 		try {
 			expenseGroups = await odooClient.fetchExpenseGroups();
 
-			// If there's only one group, auto-select it
-			if (expenseGroups.length === 1) {
-				selectedGroup = expenseGroups[0].id;
+			// Load default group from store
+			const defaultGroupId = defaultGroup.get();
+
+			if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
+				// Use saved default group
+				selectedGroup = defaultGroupId;
 				await expenseCache.setGroupFilter(selectedGroup);
+			} else if (expenseGroups.length === 1) {
+				// If there's only one group, auto-select it and save as default
+				selectedGroup = expenseGroups[0].id;
+				defaultGroup.setDefault(selectedGroup);
+				await expenseCache.setGroupFilter(selectedGroup);
+			} else if (expenseGroups.length > 1) {
+				// Multiple groups, show selector if no default
+				showGroupSelector = !defaultGroupId;
 			}
 		} catch (err) {
 			console.error('Failed to load expense groups', err);
@@ -56,8 +69,15 @@
 
 	async function handleGroupChange() {
 		if (selectedGroup) {
+			// Save as default when group changes
+			defaultGroup.setDefault(selectedGroup);
 			await expenseCache.setGroupFilter(selectedGroup);
+			showGroupSelector = false; // Hide selector after selection
 		}
+	}
+
+	function toggleGroupSelector() {
+		showGroupSelector = !showGroupSelector;
 	}
 	
 	onDestroy(() => {
@@ -160,13 +180,27 @@
 
 	<!-- Group Selection -->
 	<div class="group-selector">
-		<label for="group-filter">Expense Group:</label>
-		<select id="group-filter" bind:value={selectedGroup} on:change={handleGroupChange}>
-			<option value={null}>-- Select a group --</option>
-			{#each expenseGroups as group}
-				<option value={group.id}>{group.display_name}</option>
-			{/each}
-		</select>
+		<div class="group-header">
+			<label for="group-filter">Expense Group:</label>
+			{#if selectedGroup && !showGroupSelector}
+				<button type="button" class="switch-btn" on:click={toggleGroupSelector} title="Switch group">
+					🔄 Switch
+				</button>
+			{/if}
+		</div>
+		{#if showGroupSelector || !selectedGroup}
+			<select id="group-filter" bind:value={selectedGroup} on:change={handleGroupChange}>
+				<option value={null}>-- Select a group --</option>
+				{#each expenseGroups as group}
+					<option value={group.id}>{group.display_name}</option>
+				{/each}
+			</select>
+		{:else}
+			<div class="selected-group">
+				{expenseGroups.find(g => g.id === selectedGroup)?.display_name || 'Unknown Group'}
+			</div>
+			<small class="default-label">Default expense group</small>
+		{/if}
 	</div>
 
 	{#if !selectedGroup}
@@ -424,9 +458,16 @@
 		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 	}
 
+	.group-selector .group-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 10px;
+	}
+
 	.group-selector label {
 		display: block;
-		margin-bottom: 10px;
+		margin-bottom: 0;
 		font-weight: 600;
 		color: #333;
 	}
@@ -445,6 +486,41 @@
 	.group-selector select:focus {
 		outline: none;
 		border-color: #667eea;
+	}
+
+	.group-selector .switch-btn {
+		background: #f0f0f0;
+		color: #667eea;
+		border: 1px solid #e0e0e0;
+		border-radius: 6px;
+		padding: 6px 12px;
+		font-size: 0.85em;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.3s;
+	}
+
+	.group-selector .switch-btn:hover {
+		background: #667eea;
+		color: white;
+	}
+
+	.group-selector .selected-group {
+		padding: 12px;
+		background: #f8f9fa;
+		border: 2px solid #667eea;
+		border-radius: 8px;
+		font-size: 1em;
+		font-weight: 600;
+		color: #333;
+		margin-bottom: 8px;
+	}
+
+	.group-selector .default-label {
+		display: block;
+		color: #666;
+		font-size: 0.85em;
+		margin-top: 5px;
 	}
 
 	.info-message {

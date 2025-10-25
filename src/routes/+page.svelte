@@ -1,6 +1,7 @@
 <script>
 	import { odooClient } from '$lib/odoo';
 	import { expenseCache } from '$lib/stores/expenseCache';
+	import { defaultGroup } from '$lib/stores/defaultGroup';
 	import { onMount } from 'svelte';
 
 	let description = '';
@@ -13,16 +14,28 @@
 	let expenseGroups = []; // list of expense groups
 	let selectedGroup = ''; // selected expense group ID
 	let partners = []; // loaded from Odoo (id, display_name) - members of selected group
+	let showGroupSelector = false; // toggle for group selector
 
 	onMount(async () => {
 		try {
 			// Load expense groups
 			expenseGroups = await odooClient.fetchExpenseGroups();
 
-			// If there's only one group, auto-select it
-			if (expenseGroups.length === 1) {
-				selectedGroup = expenseGroups[0].id;
+			// Load default group from store
+			const defaultGroupId = defaultGroup.get();
+
+			if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
+				// Use saved default group
+				selectedGroup = defaultGroupId;
 				await loadGroupMembers(selectedGroup);
+			} else if (expenseGroups.length === 1) {
+				// If there's only one group, auto-select it and save as default
+				selectedGroup = expenseGroups[0].id;
+				defaultGroup.setDefault(selectedGroup);
+				await loadGroupMembers(selectedGroup);
+			} else if (expenseGroups.length > 1) {
+				// Multiple groups, show selector if no default
+				showGroupSelector = !defaultGroupId;
 			}
 		} catch (err) {
 			console.error('Failed to load expense groups', err);
@@ -51,7 +64,16 @@
 	}
 
 	async function handleGroupChange() {
+		// Save as default when group changes
+		if (selectedGroup) {
+			defaultGroup.setDefault(selectedGroup);
+		}
 		await loadGroupMembers(selectedGroup);
+		showGroupSelector = false; // Hide selector after selection
+	}
+
+	function toggleGroupSelector() {
+		showGroupSelector = !showGroupSelector;
 	}
 
 	async function handleSubmit() {
@@ -118,16 +140,30 @@
 	</nav>
 
 	<form on:submit|preventDefault={handleSubmit}>
-		<!-- Expense Group Selection -->
+		<!-- Expense Group Display/Selector -->
 		<div class="form-group">
-			<label for="group">Expense Group</label>
-			<select id="group" bind:value={selectedGroup} on:change={handleGroupChange} required>
-				<option value="">-- Select expense group --</option>
-				{#each expenseGroups as group}
-					<option value={group.id}>{group.display_name}</option>
-				{/each}
-			</select>
-			<small>Select the group for this expense</small>
+			<div class="group-header">
+				<label for="group">Expense Group</label>
+				{#if selectedGroup && !showGroupSelector}
+					<button type="button" class="switch-btn" on:click={toggleGroupSelector} title="Switch group">
+						🔄 Switch
+					</button>
+				{/if}
+			</div>
+			{#if showGroupSelector || !selectedGroup}
+				<select id="group" bind:value={selectedGroup} on:change={handleGroupChange} required>
+					<option value="">-- Select expense group --</option>
+					{#each expenseGroups as group}
+						<option value={group.id}>{group.display_name}</option>
+					{/each}
+				</select>
+				<small>Select the group for this expense</small>
+			{:else}
+				<div class="selected-group">
+					{expenseGroups.find(g => g.id === selectedGroup)?.display_name || 'Unknown Group'}
+				</div>
+				<small>Default expense group</small>
+			{/if}
 		</div>
 
 		<div class="form-group">
@@ -351,5 +387,42 @@
 	small.info {
 		color: #2563eb;
 		font-weight: 500;
+	}
+
+	.group-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 8px;
+	}
+
+	.switch-btn {
+		background: #f0f0f0;
+		color: #667eea;
+		border: 1px solid #e0e0e0;
+		border-radius: 6px;
+		padding: 6px 12px;
+		font-size: 0.85em;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.3s;
+		width: auto;
+	}
+
+	.switch-btn:hover {
+		background: #667eea;
+		color: white;
+		transform: none;
+		box-shadow: none;
+	}
+
+	.selected-group {
+		padding: 12px;
+		background: #f8f9fa;
+		border: 2px solid #667eea;
+		border-radius: 8px;
+		font-size: 16px;
+		font-weight: 600;
+		color: #333;
 	}
 </style>
