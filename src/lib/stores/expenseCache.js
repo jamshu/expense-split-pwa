@@ -381,9 +381,13 @@ function createExpenseCacheStore() {
 
 	// Set group filter and refresh
 	async function setGroupFilter(groupId) {
+		// Clear selections and update state immediately
 		update(state => ({
 			...state,
 			selectedGroupId: groupId,
+			expenses: [], // Clear expenses immediately for instant feedback
+			balances: {},
+			loading: true,
 			meta: {
 				...state.meta,
 				selectedGroupId: groupId,
@@ -395,6 +399,17 @@ function createExpenseCacheStore() {
 		clearStorage();
 		partnerMap.clear();
 		await sync(true);
+		update(state => ({ ...state, loading: false }));
+	}
+
+	// Update expenses optimistically (for instant UI updates)
+	function updateExpenses(updatedExpenses) {
+		const newBalances = calculateBalances(updatedExpenses);
+		update(state => ({
+			...state,
+			expenses: updatedExpenses,
+			balances: newBalances
+		}));
 	}
 
 	return {
@@ -403,7 +418,8 @@ function createExpenseCacheStore() {
 		sync,
 		forceRefresh,
 		destroy,
-		setGroupFilter
+		setGroupFilter,
+		updateExpenses
 	};
 }
 

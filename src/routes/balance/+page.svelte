@@ -21,6 +21,16 @@
 	let expenseGroups = [];
 	let selectedGroup = null;
 	let showGroupSelector = false;
+
+	// Multi-select for expenses
+	let selectedExpenseIds = new Set();
+	let showSettledExpenses = false;
+	let bulkActionLoading = false;
+	
+	// Reactive filtered expenses
+	$: settledExpenses = expenses.filter(e => e.x_studio_is_done === true);
+	$: unsettledExpenses = expenses.filter(e => e.x_studio_is_done !== true);
+	$: visibleExpenses = showSettledExpenses ? settledExpenses : unsettledExpenses;
 	
 	// Subscribe to cache updates
 	const unsubscribeCache = expenseCache.subscribe($cache => {
@@ -28,6 +38,11 @@
 		balances = $cache.balances;
 		loading = $cache.loading;
 		error = $cache.error;
+		
+		// Clear selections when expenses change (e.g., after group change)
+		if ($cache.selectedGroupId !== selectedGroup && selectedGroup !== null) {
+			selectedExpenseIds = new Set();
+		}
 	});
 	
 	const unsubscribeStatus = cacheStatus.subscribe($status => {
@@ -119,13 +134,13 @@
 		showParticipantDetails = true;
 	}
 
-	// Filter expenses by settlement status
+	// Filter expenses by settlement status (now using reactive variables)
 	function getSettledExpenses() {
-		return expenses.filter(e => e.x_studio_is_done === true);
+		return settledExpenses;
 	}
 
 	function getUnsettledExpenses() {
-		return expenses.filter(e => e.x_studio_is_done !== true);
+		return unsettledExpenses;
 	}
 
 	function getParticipantPayments(person, settled = false) {
@@ -162,6 +177,109 @@
 		if (!dateString) return '';
 		const date = new Date(dateString);
 		return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+	}
+
+	// Multi-select functions
+	function toggleExpenseSelection(expenseId) {
+		if (selectedExpenseIds.has(expenseId)) {
+			selectedExpenseIds.delete(expenseId);
+		} else {
+			selectedExpenseIds.add(expenseId);
+		}
+		selectedExpenseIds = new Set(selectedExpenseIds); // Trigger reactivity
+	}
+
+	function selectAllExpenses() {
+		const expensesToShow = showSettledExpenses ? getSettledExpenses() : getUnsettledExpenses();
+		selectedExpenseIds = new Set(expensesToShow.map(e => e.id));
+	}
+
+	function deselectAllExpenses() {
+		selectedExpenseIds = new Set();
+	}
+
+	async function markSelectedAsDone() {
+		if (selectedExpenseIds.size === 0) return;
+		
+		bulkActionLoading = true;
+		try {
+			const ids = Array.from(selectedExpenseIds);
+			
+			// Update local state immediately for instant UI feedback
+			const updatedExpenses = expenses.map(e => {
+				if (ids.includes(e.id)) {
+					return { ...e, x_studio_is_done: true };
+				}
+				return e;
+			});
+			
+			// Apply optimistic update to store
+			expenseCache.updateExpenses(updatedExpenses);
+			
+			// Clear selection
+			deselectAllExpenses();
+			
+			// Update in backend
+			const success = await odooClient.markExpensesAsDone(ids);
+			
+			if (success) {
+				// Sync with backend to ensure consistency
+				await expenseCache.sync();
+			} else {
+				// Revert on failure
+				await expenseCache.forceRefresh();
+				error = 'Failed to mark expenses as settled';
+			}
+		} catch (err) {
+			console.error('Error marking expenses as done:', err);
+			error = 'Failed to mark expenses as settled';
+			// Revert on error
+			await expenseCache.forceRefresh();
+		} finally {
+			bulkActionLoading = false;
+		}
+	}
+
+	async function markSelectedAsUndone() {
+		if (selectedExpenseIds.size === 0) return;
+		
+		bulkActionLoading = true;
+		try {
+			const ids = Array.from(selectedExpenseIds);
+			
+			// Update local state immediately for instant UI feedback
+			const updatedExpenses = expenses.map(e => {
+				if (ids.includes(e.id)) {
+					return { ...e, x_studio_is_done: false };
+				}
+				return e;
+			});
+			
+			// Apply optimistic update to store
+			expenseCache.updateExpenses(updatedExpenses);
+			
+			// Clear selection
+			deselectAllExpenses();
+			
+			// Update in backend
+			const success = await odooClient.markExpensesAsUndone(ids);
+			
+			if (success) {
+				// Sync with backend to ensure consistency
+				await expenseCache.sync();
+			} else {
+				// Revert on failure
+				await expenseCache.forceRefresh();
+				error = 'Failed to mark expenses as unsettled';
+			}
+		} catch (err) {
+			console.error('Error marking expenses as undone:', err);
+			error = 'Failed to mark expenses as unsettled';
+			// Revert on error
+			await expenseCache.forceRefresh();
+		} finally {
+			bulkActionLoading = false;
+		}
 	}
 </script>
 
@@ -377,22 +495,96 @@
 		{/if}
 
 		<div class="report-card">
-			<h2>📝 Recent Unsettled Expenses</h2>
-			{#if getUnsettledExpenses().length === 0}
-				<p class="empty">No unsettled expenses.</p>
+			<div class="expenses-header">
+				<h2>📝 Expense Management</h2>
+				<div class="expense-filters">
+					<button 
+						class="filter-btn" 
+						class:active={!showSettledExpenses}
+						on:click={() => { showSettledExpenses = false; deselectAllExpenses(); }}
+					>
+						Unsettled ({unsettledExpenses.length})
+					</button>
+					<button 
+						class="filter-btn" 
+						class:active={showSettledExpenses}
+						on:click={() => { showSettledExpenses = true; deselectAllExpenses(); }}
+					>
+						Settled ({settledExpenses.length})
+					</button>
+				</div>
+			</div>
+
+			{#if visibleExpenses.length === 0}
+				<p class="empty">No {showSettledExpenses ? 'settled' : 'unsettled'} expenses.</p>
 			{:else}
+				<div class="bulk-actions">
+					<div class="selection-controls">
+						<label class="select-all-checkbox">
+							<input 
+								type="checkbox" 
+								checked={selectedExpenseIds.size > 0 && selectedExpenseIds.size === visibleExpenses.length}
+								on:change={(e) => e.target.checked ? selectAllExpenses() : deselectAllExpenses()}
+							/>
+							Select All
+						</label>
+						{#if selectedExpenseIds.size > 0}
+							<span class="selection-count">{selectedExpenseIds.size} selected</span>
+						{/if}
+					</div>
+					{#if selectedExpenseIds.size > 0}
+						<div class="action-buttons">
+							{#if !showSettledExpenses}
+								<button 
+									class="action-btn settle-btn" 
+									on:click={markSelectedAsDone}
+									disabled={bulkActionLoading}
+								>
+									{bulkActionLoading ? '⏳ Processing...' : '✅ Mark as Settled'}
+								</button>
+							{:else}
+								<button 
+									class="action-btn unsettle-btn" 
+									on:click={markSelectedAsUndone}
+									disabled={bulkActionLoading}
+								>
+									{bulkActionLoading ? '⏳ Processing...' : '❌ Mark as Unsettled'}
+								</button>
+							{/if}
+						</div>
+					{/if}
+				</div>
+
 				<div class="expense-list">
-					{#each getUnsettledExpenses().slice(-10).reverse() as expense}
-						<div class="expense-item">
-							<div class="expense-header">
-								<span class="expense-type">{expense.x_studio_type === 'grocery' ? '🛒' : expense.x_studio_type === 'hotel' ? '🏨' : '📦'}</span>
-								<span class="expense-name">{expense.x_name}</span>
-								<span class="expense-amount">{formatCurrency(expense.x_studio_value)}</span>
-							</div>
-							<div class="expense-details">
-								<span>Date: <strong>{expense.x_studio_date}</strong></span>
-								<span>Paid by: <strong>{expense.x_studio_who_paid}</strong></span>
-								<span>Split: {expense.x_studio_participants}</span>
+					{#each visibleExpenses.slice(-50).reverse() as expense (expense.id)}
+						<div 
+							class="expense-item" 
+							class:settled={expense.x_studio_is_done}
+							class:selected={selectedExpenseIds.has(expense.id)}
+						>
+							<label class="expense-checkbox">
+								<input 
+									type="checkbox" 
+									checked={selectedExpenseIds.has(expense.id)}
+									on:change={() => toggleExpenseSelection(expense.id)}
+								/>
+							</label>
+							<div class="expense-content">
+								<div class="expense-header">
+									<span class="expense-type">{expense.x_studio_type === 'grocery' ? '🛒' : expense.x_studio_type === 'hotel' ? '🏨' : '📦'}</span>
+									<span class="expense-name">
+										{expense.x_name}
+										{#if expense.x_studio_is_done}
+											<span class="settled-badge">✓ Settled</span>
+										{/if}
+									</span>
+									<span class="expense-amount">{formatCurrency(expense.x_studio_value)}</span>
+								</div>
+								<div class="expense-details">
+									<span>Date: <strong>{expense.x_studio_date}</strong></span>
+									<span>Paid by: <strong>{expense.x_studio_who_paid}</strong></span>
+									<span>Split: {expense.x_studio_participants}</span>
+								</div>
 							</div>
 						</div>
 					{/each}
@@ -633,10 +825,43 @@
 	}
 
 	.expense-item {
+		display: flex;
+		align-items: flex-start;
+		gap: 12px;
 		padding: 15px;
 		background: #f8f9fa;
 		border-radius: 10px;
 		border-left: 4px solid #667eea;
+		transition: all 0.3s;
+	}
+
+	.expense-item.settled {
+		background: #e8f5e9;
+		border-left-color: #4caf50;
+		opacity: 0.9;
+	}
+
+	.expense-item.selected {
+		background: #e8eaf6;
+		border-left-width: 8px;
+		transform: translateX(2px);
+	}
+
+	.expense-checkbox {
+		display: flex;
+		align-items: center;
+		padding-top: 2px;
+	}
+
+	.expense-checkbox input[type="checkbox"] {
+		width: 18px;
+		height: 18px;
+		cursor: pointer;
+	}
+
+	.expense-content {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.expense-header {
@@ -654,6 +879,18 @@
 		flex: 1;
 		font-weight: 600;
 		color: #333;
+		display: flex;
+		align-items: center;
+		gap: 10px;
+	}
+
+	.settled-badge {
+		background: #4caf50;
+		color: white;
+		padding: 2px 8px;
+		border-radius: 12px;
+		font-size: 0.75em;
+		font-weight: 600;
 	}
 
 	.expense-amount {
@@ -667,6 +904,118 @@
 		font-size: 0.9em;
 		color: #666;
 		flex-wrap: wrap;
+	}
+
+	.expenses-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		margin-bottom: 20px;
+		flex-wrap: wrap;
+		gap: 15px;
+	}
+
+	.expense-filters {
+		display: flex;
+		gap: 10px;
+	}
+
+	.filter-btn {
+		padding: 8px 16px;
+		background: #f0f0f0;
+		border: 1px solid #e0e0e0;
+		border-radius: 8px;
+		cursor: pointer;
+		font-weight: 600;
+		transition: all 0.3s;
+	}
+
+	.filter-btn:hover {
+		background: #e0e0e0;
+	}
+
+	.filter-btn.active {
+		background: #667eea;
+		color: white;
+		border-color: #667eea;
+	}
+
+	.bulk-actions {
+		background: #f5f5f5;
+		padding: 15px;
+		border-radius: 10px;
+		margin-bottom: 15px;
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 15px;
+	}
+
+	.selection-controls {
+		display: flex;
+		align-items: center;
+		gap: 20px;
+	}
+
+	.select-all-checkbox {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.select-all-checkbox input[type="checkbox"] {
+		width: 18px;
+		height: 18px;
+		cursor: pointer;
+	}
+
+	.selection-count {
+		color: #667eea;
+		font-weight: 600;
+	}
+
+	.action-buttons {
+		display: flex;
+		gap: 10px;
+	}
+
+	.action-btn {
+		padding: 10px 20px;
+		border: none;
+		border-radius: 8px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.3s;
+	}
+
+	.settle-btn {
+		background: #4caf50;
+		color: white;
+	}
+
+	.settle-btn:hover:not(:disabled) {
+		background: #45a049;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 8px rgba(76, 175, 80, 0.3);
+	}
+
+	.unsettle-btn {
+		background: #ff9800;
+		color: white;
+	}
+
+	.unsettle-btn:hover:not(:disabled) {
+		background: #fb8c00;
+		transform: translateY(-1px);
+		box-shadow: 0 4px 8px rgba(255, 152, 0, 0.3);
+	}
+
+	.action-btn:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
 	}
 
 	/* Modal styles */

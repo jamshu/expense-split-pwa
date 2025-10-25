@@ -201,6 +201,56 @@ class OdooAPI {
 		const result = await this.callApi('delete', { id });
 		return result.result;
 	}
+
+	/**
+	 * Mark multiple expenses as done/settled
+	 * @param {number[]} ids - Array of expense IDs to mark as done
+	 * @returns {Promise<boolean>}
+	 */
+	async markExpensesAsDone(ids) {
+		if (!Array.isArray(ids) || ids.length === 0) {
+			return false;
+		}
+
+		// Update all expenses in parallel
+		const updatePromises = ids.map(id => 
+			this.updateExpense(id, { x_studio_is_done: true })
+		);
+
+		try {
+			const results = await Promise.all(updatePromises);
+			// Return true if all updates succeeded
+			return results.every(result => result === true);
+		} catch (error) {
+			console.error('Failed to mark expenses as done:', error);
+			return false;
+		}
+	}
+
+	/**
+	 * Mark multiple expenses as undone/unsettled
+	 * @param {number[]} ids - Array of expense IDs to mark as undone
+	 * @returns {Promise<boolean>}
+	 */
+	async markExpensesAsUndone(ids) {
+		if (!Array.isArray(ids) || ids.length === 0) {
+			return false;
+		}
+
+		// Update all expenses in parallel
+		const updatePromises = ids.map(id => 
+			this.updateExpense(id, { x_studio_is_done: false })
+		);
+
+		try {
+			const results = await Promise.all(updatePromises);
+			// Return true if all updates succeeded
+			return results.every(result => result === true);
+		} catch (error) {
+			console.error('Failed to mark expenses as undone:', error);
+			return false;
+		}
+	}
 }
 
 export const odooClient = new OdooAPI();
