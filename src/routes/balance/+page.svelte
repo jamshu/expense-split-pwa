@@ -1,7 +1,8 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { expenseCache, recentExpenses, cacheStatus } from '$lib/stores/expenseCache';
-	
+	import { odooClient } from '$lib/odoo';
+
 	// Subscribe to cache store
 	let expenses = [];
 	let balances = {};
@@ -10,10 +11,14 @@
 	let error = '';
 	let lastSync = 0;
 	let isStale = false;
-	
+
 	let selectedParticipant = '';
 	let showParticipantDetails = false;
 	let showRefreshTooltip = false;
+
+	// Group selection
+	let expenseGroups = [];
+	let selectedGroup = null;
 	
 	// Subscribe to cache updates
 	const unsubscribeCache = expenseCache.subscribe($cache => {
@@ -30,10 +35,30 @@
 	});
 	
 	onMount(async () => {
+		// Load expense groups first
+		try {
+			expenseGroups = await odooClient.fetchExpenseGroups();
+
+			// If there's only one group, auto-select it
+			if (expenseGroups.length === 1) {
+				selectedGroup = expenseGroups[0].id;
+				await expenseCache.setGroupFilter(selectedGroup);
+			}
+		} catch (err) {
+			console.error('Failed to load expense groups', err);
+			error = 'Failed to load expense groups';
+		}
+
 		// Initialize cache store - will show cached data immediately
 		// and sync in background if needed
 		await expenseCache.initialize();
 	});
+
+	async function handleGroupChange() {
+		if (selectedGroup) {
+			await expenseCache.setGroupFilter(selectedGroup);
+		}
+	}
 	
 	onDestroy(() => {
 		// Clean up subscriptions and background sync
@@ -126,7 +151,30 @@
 
 <div class="container">
 	<h1>📊 Balance Report</h1>
-	
+
+	<!-- Navigation -->
+	<nav>
+		<a href="/">Add Expense</a>
+		<a href="/balance" class="active">Balance Report</a>
+	</nav>
+
+	<!-- Group Selection -->
+	<div class="group-selector">
+		<label for="group-filter">Expense Group:</label>
+		<select id="group-filter" bind:value={selectedGroup} on:change={handleGroupChange}>
+			<option value={null}>-- Select a group --</option>
+			{#each expenseGroups as group}
+				<option value={group.id}>{group.display_name}</option>
+			{/each}
+		</select>
+	</div>
+
+	{#if !selectedGroup}
+		<div class="info-message">
+			Please select an expense group to view balances
+		</div>
+	{:else}
+
 	<!-- Cache Status Bar -->
 	<div class="cache-status-bar">
 		<div class="cache-info">
@@ -160,11 +208,6 @@
 		</button>
 	</div>
 
-	<nav>
-		<a href="/">Add Expense</a>
-		<a href="/balance" class="active">Balance Report</a>
-	</nav>
-
 	{#if loading}
 		<div class="loading">⏳ Loading...</div>
 	{:else if error}
@@ -177,7 +220,7 @@
 			{:else}
 				<div class="balance-list">
 					{#each Object.entries(balances) as [person, balance]}
-						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0} on:click={() => openParticipantDetails(person)} style="cursor:pointer;">
+						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0} on:click={() => openParticipantDetails(person)} on:keydown={(e) => e.key === 'Enter' && openParticipantDetails(person)} role="button" tabindex="0">
 							<span class="person">{person}</span>
 							<span class="amount" class:green={balance > 0} class:red={balance < 0}>
 								{formatCurrency(Math.abs(balance))}
@@ -196,7 +239,7 @@
 		</div>
 
 		{#if showParticipantDetails}
-			<div class="modal-bg" on:click={closeParticipantDetails}></div>
+			<div class="modal-bg" on:click={closeParticipantDetails} on:keydown={(e) => e.key === 'Escape' && closeParticipantDetails()} role="button" tabindex="0"></div>
 			<div class="participant-modal">
 				<div class="modal-header">
 					<h3>💼 Details for <span class="person">{selectedParticipant}</span></h3>
@@ -323,6 +366,7 @@
 			{/if}
 		</div>
 	{/if}
+	{/if}
 </div>
 
 <style>
@@ -370,6 +414,46 @@
 	nav a.active {
 		background: #667eea;
 		color: white;
+	}
+
+	.group-selector {
+		background: white;
+		padding: 20px;
+		border-radius: 15px;
+		margin-bottom: 20px;
+		box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+	}
+
+	.group-selector label {
+		display: block;
+		margin-bottom: 10px;
+		font-weight: 600;
+		color: #333;
+	}
+
+	.group-selector select {
+		width: 100%;
+		padding: 12px;
+		border: 2px solid #e0e0e0;
+		border-radius: 8px;
+		font-size: 1em;
+		background: white;
+		cursor: pointer;
+		transition: border-color 0.3s;
+	}
+
+	.group-selector select:focus {
+		outline: none;
+		border-color: #667eea;
+	}
+
+	.info-message {
+		background: white;
+		padding: 30px;
+		border-radius: 15px;
+		text-align: center;
+		color: #666;
+		font-size: 1.1em;
 	}
 
 	.loading,
@@ -421,6 +505,7 @@
 		background: #f8f9fa;
 		border-radius: 10px;
 		transition: transform 0.2s;
+		cursor: pointer;
 	}
 
 	.balance-item:hover {
@@ -519,6 +604,7 @@
 		backdrop-filter: blur(4px);
 		z-index: 100;
 		animation: fadeIn 0.2s ease-out;
+		cursor: pointer;
 	}
 
 	@keyframes fadeIn {

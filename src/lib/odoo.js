@@ -96,6 +96,7 @@ class OdooAPI {
 	 * Fetch default participants configured in x_expense_participants model.
 	 * Expects a single record with field `x_studio_default_participants` containing partner ids.
 	 * Returns Array<{id:number, display_name:string}> limited to the configured list.
+	 * @deprecated Use fetchExpenseGroups() and fetchGroupMembers() instead
 	 */
 	async fetchDefaultParticipants() {
 		// read the one configuration record
@@ -108,6 +109,50 @@ class OdooAPI {
 		if (ids.length === 0) return [];
 		// fetch partner display names for these ids
 		return await this.searchModel('res.partner', [['id', 'in', ids]], ['id', 'display_name']);
+	}
+
+	/**
+	 * Fetch all expense groups from x_expensegroup model
+	 * @returns {Promise<Array<{id:number, display_name:string, x_studio_members:any}>>}
+	 */
+	async fetchExpenseGroups() {
+		return await this.searchModel('x_expensegroup', [], ['id', 'display_name', 'x_studio_members']);
+	}
+
+	/**
+	 * Fetch members of a specific expense group
+	 * @param {number} groupId - The expense group ID
+	 * @returns {Promise<Array<{id:number, display_name:string}>>}
+	 */
+	async fetchGroupMembers(groupId) {
+		if (!groupId) return [];
+
+		// Fetch the group record with members field
+		const groups = await this.searchModel('x_expensegroup', [['id', '=', groupId]], ['id', 'x_studio_members']);
+
+		if (!Array.isArray(groups) || groups.length === 0) return [];
+
+		const group = groups[0];
+		const memberIds = [];
+
+		// Extract member IDs from the x_studio_members field
+		// This could be in different formats: array of IDs, array of tuples, etc.
+		if (Array.isArray(group.x_studio_members)) {
+			for (const member of group.x_studio_members) {
+				if (Array.isArray(member) && member.length > 0) {
+					// Format: [id, "display_name"]
+					memberIds.push(Number(member[0]));
+				} else if (typeof member === 'number') {
+					// Format: id
+					memberIds.push(Number(member));
+				}
+			}
+		}
+
+		if (memberIds.length === 0) return [];
+
+		// Fetch partner display names for these member IDs
+		return await this.searchModel('res.partner', [['id', 'in', memberIds]], ['id', 'display_name']);
 	}
 
 	/**

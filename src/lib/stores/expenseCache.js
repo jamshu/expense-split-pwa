@@ -19,6 +19,7 @@ const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
  * @property {string} x_studio_type
  * @property {string} x_studio_date
  * @property {boolean} [x_studio_is_done]
+ * @property {any} [x_studio_expensegroup]
  */
 
 /**
@@ -27,6 +28,7 @@ const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
  * @property {number} lastRecordId
  * @property {number} recordCount
  * @property {boolean} isStale
+ * @property {number|null} selectedGroupId
  */
 
 /**
@@ -37,6 +39,7 @@ const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
  * @property {string} error
  * @property {CacheMeta} meta
  * @property {Record<string, number>} balances
+ * @property {number|null} selectedGroupId
  */
 
 // Helper functions for localStorage
@@ -68,7 +71,8 @@ function loadFromStorage() {
 			lastSyncTime: 0,
 			lastRecordId: 0,
 			recordCount: 0,
-			isStale: true
+			isStale: true,
+			selectedGroupId: null
 		}
 	};
 }
@@ -108,7 +112,8 @@ function createExpenseCacheStore() {
 		syncing: false,
 		error: '',
 		meta: initialCache.meta,
-		balances: calculateBalances(initialCache.expenses)
+		balances: calculateBalances(initialCache.expenses),
+		selectedGroupId: initialCache.meta.selectedGroupId || null
 	});
 	
 	let syncInterval = null;
@@ -202,19 +207,25 @@ function createExpenseCacheStore() {
 				'x_studio_participants',
 				'x_studio_type',
 				'x_studio_date',
-				'x_studio_is_done'
+				'x_studio_is_done',
+				'x_studio_expensegroup'
 			];
-			
+
 			let currentState;
 			subscribe(s => currentState = s)();
-			
-			// Determine domain based on cache state
+
+			// Determine domain based on cache state and group filter
 			let domain = [];
 			let fetchedExpenses = [];
-			
+
+			// Build base domain with group filter if selected
+			if (currentState.selectedGroupId) {
+				domain.push(['x_studio_expensegroup', '=', currentState.selectedGroupId]);
+			}
+
 			if (!forceFullRefresh && currentState.meta.lastRecordId > 0) {
 				// Incremental fetch - get only new records
-				domain = [['id', '>', currentState.meta.lastRecordId]];
+				domain.push(['id', '>', currentState.meta.lastRecordId]);
 				
 				try {
 					fetchedExpenses = await odooClient.searchExpenses(domain, fields);
@@ -235,8 +246,11 @@ function createExpenseCacheStore() {
 			}
 			
 			if (forceFullRefresh || currentState.meta.lastRecordId === 0) {
-				// Full refresh
+				// Full refresh - reset domain with group filter only
 				domain = [];
+				if (currentState.selectedGroupId) {
+					domain.push(['x_studio_expensegroup', '=', currentState.selectedGroupId]);
+				}
 				fetchedExpenses = await odooClient.searchExpenses(domain, fields);
 			}
 			
@@ -280,7 +294,8 @@ function createExpenseCacheStore() {
 				lastSyncTime: Date.now(),
 				lastRecordId,
 				recordCount: expensesWithNames.length,
-				isStale: false
+				isStale: false,
+				selectedGroupId: currentState.selectedGroupId
 			};
 			
 			// Save to storage
@@ -296,7 +311,8 @@ function createExpenseCacheStore() {
 				meta: newMeta,
 				balances: newBalances,
 				syncing: false,
-				error: ''
+				error: '',
+				selectedGroupId: currentState.selectedGroupId
 			}));
 			
 		} catch (error) {
@@ -362,13 +378,32 @@ function createExpenseCacheStore() {
 		partnerMap.clear();
 		await sync(true);
 	}
-	
+
+	// Set group filter and refresh
+	async function setGroupFilter(groupId) {
+		update(state => ({
+			...state,
+			selectedGroupId: groupId,
+			meta: {
+				...state.meta,
+				selectedGroupId: groupId,
+				isStale: true
+			}
+		}));
+
+		// Clear cache and do full refresh with new filter
+		clearStorage();
+		partnerMap.clear();
+		await sync(true);
+	}
+
 	return {
 		subscribe,
 		initialize,
 		sync,
 		forceRefresh,
-		destroy
+		destroy,
+		setGroupFilter
 	};
 }
 

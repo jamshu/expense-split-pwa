@@ -10,21 +10,56 @@
 	let loading = false;
 	let message = '';
 
-	let partners = []; // loaded from Odoo (id, display_name)
+	let expenseGroups = []; // list of expense groups
+	let selectedGroup = ''; // selected expense group ID
+	let partners = []; // loaded from Odoo (id, display_name) - members of selected group
 
 	onMount(async () => {
 		try {
-			// try to load configured default participants first; fallback to all partners
-			partners = await odooClient.fetchDefaultParticipants();
-			if (!partners || partners.length === 0) {
-				partners = await odooClient.fetchPartners();
+			// Load expense groups
+			expenseGroups = await odooClient.fetchExpenseGroups();
+
+			// If there's only one group, auto-select it
+			if (expenseGroups.length === 1) {
+				selectedGroup = expenseGroups[0].id;
+				await loadGroupMembers(selectedGroup);
 			}
 		} catch (err) {
-			console.error('Failed to load partners', err);
+			console.error('Failed to load expense groups', err);
 		}
 	});
 
+	async function loadGroupMembers(groupId) {
+		if (!groupId) {
+			partners = [];
+			return;
+		}
+
+		try {
+			loading = true;
+			partners = await odooClient.fetchGroupMembers(groupId);
+
+			// Reset payer and participants when group changes
+			payer = '';
+			participants = [];
+		} catch (err) {
+			console.error('Failed to load group members', err);
+			message = `❌ Failed to load group members: ${err.message}`;
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function handleGroupChange() {
+		await loadGroupMembers(selectedGroup);
+	}
+
 	async function handleSubmit() {
+		if (!selectedGroup) {
+			message = '⚠️ Please select an expense group';
+			return;
+		}
+
 		if (!description || !amount || !payer || participants.length === 0) {
 			message = '⚠️ Please fill all fields';
 			return;
@@ -37,8 +72,10 @@
 				const payload = {
 					x_name: description,
 					x_studio_value: parseFloat(amount),
-					// format many2one
-					x_studio_who_paid: odooClient.formatMany2one(payer)
+					// format many2one for payer
+					x_studio_who_paid: odooClient.formatMany2one(payer),
+					// format many2one for expense group
+					x_studio_expensegroup: odooClient.formatMany2one(selectedGroup)
 				};
 
 				// format many2many if participants present
@@ -51,11 +88,11 @@
 			await odooClient.createExpense(payload);
 
 		message = '✅ Expense added successfully!';
-		
+
 		// Immediately sync the expense cache to update balances
 		expenseCache.sync();
-		
-		// Reset form
+
+		// Reset form (keep group selection)
 		description = '';
 		amount = '';
 		payer = '';
@@ -81,7 +118,17 @@
 	</nav>
 
 	<form on:submit|preventDefault={handleSubmit}>
-		<!-- expense type removed: not used -->
+		<!-- Expense Group Selection -->
+		<div class="form-group">
+			<label for="group">Expense Group</label>
+			<select id="group" bind:value={selectedGroup} on:change={handleGroupChange} required>
+				<option value="">-- Select expense group --</option>
+				{#each expenseGroups as group}
+					<option value={group.id}>{group.display_name}</option>
+				{/each}
+			</select>
+			<small>Select the group for this expense</small>
+		</div>
 
 		<div class="form-group">
 			<label for="description">Description</label>
@@ -109,25 +156,34 @@
 
 		<div class="form-group">
 			<label for="payer">Who Paid?</label>
-			<select id="payer" bind:value={payer} required>
+			<select id="payer" bind:value={payer} required disabled={!selectedGroup || partners.length === 0}>
 				<option value="">-- Select payer --</option>
 				{#each partners as p}
 					<option value={p.id}>{p.display_name}</option>
 				{/each}
 			</select>
+			{#if selectedGroup && partners.length === 0}
+				<small class="warning">No members found in this group</small>
+			{/if}
 		</div>
 
 		<div class="form-group">
 			<label>Participants</label>
-			<div class="checkbox-grid">
-				{#each partners as p}
-					<label class="checkbox-item">
-						<input type="checkbox" bind:group={participants} value={p.id} />
-						{p.display_name}
-					</label>
-				{/each}
-			</div>
-			<small>Tick participants who share this expense</small>
+			{#if !selectedGroup}
+				<small class="info">Please select an expense group first</small>
+			{:else if partners.length === 0}
+				<small class="warning">No members available in this group</small>
+			{:else}
+				<div class="checkbox-grid">
+					{#each partners as p}
+						<label class="checkbox-item">
+							<input type="checkbox" bind:group={participants} value={p.id} />
+							{p.display_name}
+						</label>
+					{/each}
+				</div>
+				<small>Tick participants who share this expense</small>
+			{/if}
 		</div>
 
 		{#if message}
@@ -285,5 +341,15 @@
 	.message.error {
 		background: #f8d7da;
 		color: #721c24;
+	}
+
+	small.warning {
+		color: #d97706;
+		font-weight: 500;
+	}
+
+	small.info {
+		color: #2563eb;
+		font-weight: 500;
 	}
 </style>
