@@ -52,40 +52,59 @@
 	});
 	
 	onMount(async () => {
-		// Load expense groups first
-		try {
-			expenseGroups = await odooClient.fetchExpenseGroups();
+		// Start both operations in parallel for faster loading
+		const groupsPromise = odooClient.fetchExpenseGroups().catch(err => {
+			console.error('Failed to load expense groups', err);
+			error = 'Failed to load expense groups';
+			return [];
+		});
 
-			// Load default group from store
-			const defaultGroupId = defaultGroup.get();
-
+		// Load default group from store
+		const defaultGroupId = defaultGroup.get();
+		
+		// Set group filter if we have a default (non-blocking)
+		if (defaultGroupId) {
+			selectedGroup = defaultGroupId;
+			expenseCache.setGroupFilter(selectedGroup); // Don't await
+		}
+		
+		// Initialize cache immediately (will show cached data)
+		expenseCache.initialize(); // Don't await
+		
+		// Now wait for groups to finish loading
+		expenseGroups = await groupsPromise;
+		
+		// Handle group selection after groups are loaded
+		if (expenseGroups.length > 0) {
 			if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
-				// Use saved default group
+				// Already set above, just verify it exists
 				selectedGroup = defaultGroupId;
-				await expenseCache.setGroupFilter(selectedGroup);
 			} else if (expenseGroups.length === 1) {
 				// If there's only one group, auto-select it and save as default
 				selectedGroup = expenseGroups[0].id;
 				defaultGroup.setDefault(selectedGroup);
-				await expenseCache.setGroupFilter(selectedGroup);
+				if (!defaultGroupId) {
+					// Only set filter if we didn't already have a default
+					expenseCache.setGroupFilter(selectedGroup);
+				}
 			} else if (expenseGroups.length > 1) {
 				// Multiple groups, show selector if no default
 				showGroupSelector = !defaultGroupId;
 			}
-		} catch (err) {
-			console.error('Failed to load expense groups', err);
-			error = 'Failed to load expense groups';
 		}
-
-		// Initialize cache store - will show cached data immediately
-		// and sync in background if needed
-		await expenseCache.initialize();
 	});
 
 	async function handleGroupChange() {
 		if (selectedGroup) {
 			// Save as default when group changes
 			defaultGroup.setDefault(selectedGroup);
+			
+			// Clear expenses immediately for visual feedback
+			expenses = [];
+			balances = {};
+			selectedExpenseIds = new Set();
+			
+			// Load new group data
 			await expenseCache.setGroupFilter(selectedGroup);
 			showGroupSelector = false; // Hide selector after selection
 		}
@@ -360,9 +379,9 @@
 		</button>
 	</div>
 
-	{#if loading}
+	{#if loading && expenses.length === 0}
 		<div class="loading">⏳ Loading...</div>
-	{:else if error}
+	{:else if error && expenses.length === 0}
 		<div class="error-box">❌ Error: {error}</div>
 	{:else}
 		<div class="report-card">

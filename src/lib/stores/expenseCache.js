@@ -4,8 +4,8 @@ import { odooClient } from '$lib/odoo';
 import { calculateBalances } from '$lib/expenseUtils';
 
 // Cache configuration
-const CACHE_KEY = 'expense_cache_v2';
-const CACHE_META_KEY = 'expense_cache_meta';
+const CACHE_KEY_PREFIX = 'expense_cache_v4_group_'; // Per-group cache
+const CACHE_META_KEY_PREFIX = 'expense_cache_meta_v4_group_';
 const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes cache validity
 const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
 
@@ -43,10 +43,27 @@ const SYNC_INTERVAL_MS = 3 * 60 * 1000; // Background sync every 3 minute
  */
 
 // Helper functions for localStorage
-function loadFromStorage() {
+function loadFromStorage(groupId = null) {
 	try {
-		const cachedData = localStorage.getItem(CACHE_KEY);
-		const meta = localStorage.getItem(CACHE_META_KEY);
+		// If no group specified, return empty
+		if (!groupId) {
+			return {
+				expenses: [],
+				meta: {
+					lastSyncTime: 0,
+					lastRecordId: 0,
+					recordCount: 0,
+					isStale: true,
+					selectedGroupId: null
+				}
+			};
+		}
+		
+		const cacheKey = `${CACHE_KEY_PREFIX}${groupId}`;
+		const metaKey = `${CACHE_META_KEY_PREFIX}${groupId}`;
+		
+		const cachedData = localStorage.getItem(cacheKey);
+		const meta = localStorage.getItem(metaKey);
 		
 		if (cachedData && meta) {
 			const expenses = JSON.parse(cachedData);
@@ -72,29 +89,48 @@ function loadFromStorage() {
 			lastRecordId: 0,
 			recordCount: 0,
 			isStale: true,
-			selectedGroupId: null
+			selectedGroupId: groupId
 		}
 	};
 }
 
 function saveToStorage(expenses, meta) {
 	try {
-		localStorage.setItem(CACHE_KEY, JSON.stringify(expenses));
-		localStorage.setItem(CACHE_META_KEY, JSON.stringify({
+		if (!meta.selectedGroupId) return; // Don't save if no group selected
+		
+		const cacheKey = `${CACHE_KEY_PREFIX}${meta.selectedGroupId}`;
+		const metaKey = `${CACHE_META_KEY_PREFIX}${meta.selectedGroupId}`;
+		
+		localStorage.setItem(cacheKey, JSON.stringify(expenses));
+		localStorage.setItem(metaKey, JSON.stringify({
 			lastSyncTime: meta.lastSyncTime || Date.now(),
 			lastRecordId: meta.lastRecordId || 0,
 			recordCount: expenses.length,
-			isStale: false
+			isStale: false,
+			selectedGroupId: meta.selectedGroupId
 		}));
 	} catch (e) {
 		console.warn('Failed to save cache to storage:', e);
 	}
 }
 
-function clearStorage() {
+function clearStorage(groupId = null) {
 	try {
-		localStorage.removeItem(CACHE_KEY);
-		localStorage.removeItem(CACHE_META_KEY);
+		if (groupId) {
+			// Clear specific group cache
+			const cacheKey = `${CACHE_KEY_PREFIX}${groupId}`;
+			const metaKey = `${CACHE_META_KEY_PREFIX}${groupId}`;
+			localStorage.removeItem(cacheKey);
+			localStorage.removeItem(metaKey);
+		} else {
+			// Clear all caches
+			const keys = Object.keys(localStorage);
+			keys.forEach(key => {
+				if (key.startsWith(CACHE_KEY_PREFIX) || key.startsWith(CACHE_META_KEY_PREFIX)) {
+					localStorage.removeItem(key);
+				}
+			});
+		}
 	} catch (e) {
 		console.warn('Failed to clear cache:', e);
 	}
@@ -102,8 +138,8 @@ function clearStorage() {
 
 // Create the main store
 function createExpenseCacheStore() {
-	// Load initial state from cache
-	const initialCache = loadFromStorage();
+	// Start with empty state
+	const initialCache = { expenses: [], meta: { lastSyncTime: 0, lastRecordId: 0, recordCount: 0, isStale: true, selectedGroupId: null } };
 	
 	/** @type {import('svelte/store').Writable<CacheState>} */
 	const { subscribe, set, update } = writable({
@@ -196,6 +232,7 @@ function createExpenseCacheStore() {
 	
 	// Sync function - fetches new data from server
 	async function sync(forceFullRefresh = false) {
+		// Only show syncing indicator, don't set loading
 		update(state => ({ ...state, syncing: true, error: '' }));
 		
 		try {
@@ -223,7 +260,9 @@ function createExpenseCacheStore() {
 				domain.push(['x_studio_expensegroup', '=', currentState.selectedGroupId]);
 			}
 
-			if (!forceFullRefresh && currentState.meta.lastRecordId > 0) {
+			// For incremental sync, only fetch if we have matching cached data
+			if (!forceFullRefresh && currentState.meta.lastRecordId > 0 && 
+			    currentState.meta.selectedGroupId === currentState.selectedGroupId) {
 				// Incremental fetch - get only new records
 				domain.push(['id', '>', currentState.meta.lastRecordId]);
 				
@@ -327,12 +366,15 @@ function createExpenseCacheStore() {
 	
 	// Initial load - show cached data immediately, then sync in background
 	async function initialize() {
-		update(state => ({ ...state, loading: true }));
+		// Get current group
+		let currentGroupId;
+		subscribe(s => currentGroupId = s.selectedGroupId)();
 		
-		// If we have cached data, show it immediately
-		const currentState = loadFromStorage();
+		// Load cached data for the current group
+		const currentState = loadFromStorage(currentGroupId);
+		
 		if (currentState.expenses.length > 0) {
-			// Resolve names for cached data
+			// Show cached data immediately (no loading state)
 			const expensesWithNames = await resolvePartnerNames(currentState.expenses);
 			const balances = calculateBalances(expensesWithNames);
 			
@@ -340,15 +382,16 @@ function createExpenseCacheStore() {
 				...state,
 				expenses: expensesWithNames,
 				balances,
-				loading: false
+				loading: false,
+				meta: currentState.meta
 			}));
 			
-			// Then sync in the background
+			// Then sync in the background if stale
 			if (currentState.meta.isStale) {
 				sync();
 			}
-		} else {
-			// No cache, do initial sync
+		} else if (currentGroupId) {
+			// No cache for this group, do initial sync
 			update(state => ({ ...state, loading: true }));
 			await sync(true);
 			update(state => ({ ...state, loading: false }));
@@ -374,32 +417,54 @@ function createExpenseCacheStore() {
 	
 	// Force refresh function
 	async function forceRefresh() {
-		clearStorage();
+		// Don't clear storage immediately - let sync handle it
 		partnerMap.clear();
 		await sync(true);
 	}
 
 	// Set group filter and refresh
 	async function setGroupFilter(groupId) {
-		// Clear selections and update state immediately
-		update(state => ({
-			...state,
-			selectedGroupId: groupId,
-			expenses: [], // Clear expenses immediately for instant feedback
-			balances: {},
-			loading: true,
-			meta: {
-				...state.meta,
+		// Load cached data for the new group first
+		const cachedState = loadFromStorage(groupId);
+		
+		if (cachedState.expenses.length > 0) {
+			// Show cached data immediately
+			const expensesWithNames = await resolvePartnerNames(cachedState.expenses);
+			const balances = calculateBalances(expensesWithNames);
+			
+			update(state => ({
+				...state,
 				selectedGroupId: groupId,
-				isStale: true
+				expenses: expensesWithNames,
+				balances,
+				loading: false,
+				meta: cachedState.meta
+			}));
+			
+			// Sync in background if stale
+			if (cachedState.meta.isStale) {
+				sync();
 			}
-		}));
-
-		// Clear cache and do full refresh with new filter
-		clearStorage();
+		} else {
+			// No cache for this group, load fresh
+			update(state => ({
+				...state,
+				selectedGroupId: groupId,
+				expenses: [],
+				balances: {},
+				loading: true,
+				meta: {
+					...state.meta,
+					selectedGroupId: groupId,
+					isStale: true
+				}
+			}));
+			
+			await sync(true);
+			update(state => ({ ...state, loading: false }));
+		}
+		
 		partnerMap.clear();
-		await sync(true);
-		update(state => ({ ...state, loading: false }));
 	}
 
 	// Update expenses optimistically (for instant UI updates)
