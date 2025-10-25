@@ -67,24 +67,53 @@ function createGroupCacheStore() {
 
 			// Extract and store all unique partners from groups
 			const allPartners = [];
+			const partnerIds = new Set();
+			
 			for (const group of syncedGroups) {
 				if (Array.isArray(group.x_studio_members)) {
 					for (const member of group.x_studio_members) {
+						let partnerId, partnerName;
+						
 						if (Array.isArray(member) && member.length >= 2) {
 							// Format: [id, "display_name"]
-							const partnerId = Number(member[0]);
-							const partnerName = member[1];
-							if (!allPartners.find(p => p.id === partnerId)) {
-								allPartners.push({ id: partnerId, display_name: partnerName });
-							}
+							partnerId = Number(member[0]);
+							partnerName = member[1];
+						} else if (typeof member === 'number') {
+							// Just ID, need to fetch the name
+							partnerIds.add(Number(member));
+							continue;
+						}
+						
+						if (partnerId && partnerName && !partnerIds.has(partnerId)) {
+							partnerIds.add(partnerId);
+							allPartners.push({ id: partnerId, display_name: partnerName });
 						}
 					}
 				}
 			}
+			
+			// If we have IDs without names, fetch them
+			if (partnerIds.size > allPartners.length && navigator.onLine) {
+				try {
+					const missingIds = Array.from(partnerIds).filter(id => !allPartners.find(p => p.id === id));
+					if (missingIds.length > 0) {
+						const partners = await odooClient.searchModel(
+							'res.partner',
+							[['id', 'in', missingIds]],
+							['id', 'display_name']
+						);
+						allPartners.push(...partners);
+					}
+				} catch (err) {
+					console.warn('Failed to fetch missing partner names:', err);
+				}
+			}
 
 			// Save groups and partners to IndexedDB
+			// Partners are saved with putMany which updates existing records
 			await putMany(STORES.GROUPS, syncedGroups);
 			if (allPartners.length > 0) {
+				console.log('Updating partners cache:', allPartners);
 				await putMany(STORES.PARTNERS, allPartners);
 			}
 			await meta('lastGroupSync', Date.now());

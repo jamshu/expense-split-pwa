@@ -153,6 +153,34 @@
 	function toggleGroupSelector() {
 		showGroupSelector = !showGroupSelector;
 	}
+	
+	async function handleRefreshGroups() {
+		if (!navigator.onLine) {
+			message = '⚠️ Cannot refresh groups while offline';
+			return;
+		}
+		
+		loading = true;
+		message = 'Refreshing groups and members...';
+		
+		try {
+			// Force refresh groups from server
+			await groupCache.sync(true);
+			
+			// Reload current group members if a group is selected
+			if (selectedGroup) {
+				await loadGroupMembers(selectedGroup);
+			}
+			
+			message = '✅ Groups and members refreshed!';
+			setTimeout(() => { message = ''; }, 3000);
+		} catch (err) {
+			console.error('Failed to refresh groups:', err);
+			message = '❌ Failed to refresh groups';
+		} finally {
+			loading = false;
+		}
+	}
 
 	async function handleSubmit() {
 		if (!selectedGroup) {
@@ -231,11 +259,18 @@
 		<div class="form-group">
 			<div class="group-header">
 				<label for="group">Expense Group</label>
-				{#if selectedGroup && !showGroupSelector}
-					<button type="button" class="switch-btn" on:click={toggleGroupSelector} title="Switch group">
-						🔄 Switch
-					</button>
-				{/if}
+				<div class="group-actions">
+					{#if selectedGroup && !showGroupSelector}
+						<button type="button" class="switch-btn" on:click={toggleGroupSelector} title="Switch group">
+							🔄 Switch
+						</button>
+					{/if}
+					{#if !isOffline}
+						<button type="button" class="refresh-btn-small" on:click={handleRefreshGroups} title="Refresh groups & members">
+							🔄
+						</button>
+					{/if}
+				</div>
 			</div>
 			{#if showGroupSelector || !selectedGroup}
 				<select id="group" bind:value={selectedGroup} on:change={handleGroupChange} required>
@@ -499,7 +534,13 @@
 		align-items: center;
 		margin-bottom: 8px;
 	}
-
+	
+	.group-actions {
+		display: flex;
+		gap: 8px;
+		align-items: center;
+	}
+	
 	.switch-btn {
 		background: #f0f0f0;
 		color: #667eea;
@@ -511,6 +552,24 @@
 		cursor: pointer;
 		transition: all 0.3s;
 		width: auto;
+	}
+	
+	.refresh-btn-small {
+		background: #f0f0f0;
+		color: #667eea;
+		border: 1px solid #e0e0e0;
+		border-radius: 6px;
+		padding: 6px 10px;
+		font-size: 1em;
+		cursor: pointer;
+		transition: all 0.3s;
+		width: auto;
+		min-width: auto;
+	}
+	
+	.refresh-btn-small:hover:not(:disabled) {
+		background: #e8e8e8;
+		transform: rotate(360deg);
 	}
 
 	.switch-btn:hover {
