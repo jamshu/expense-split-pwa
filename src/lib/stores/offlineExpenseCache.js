@@ -50,14 +50,19 @@ function createOfflineExpenseCacheStore() {
 	const { subscribe, set, update } = writable(initialState);
 
 	let syncInterval = null;
-	let partnerMap = new Map();
-	let groupMap = new Map();
 	let onlineListener = null;
 	let offlineListener = null;
 
 	// Helper to resolve partner and group names
 	async function resolvePartnerNames(expenses) {
 		try {
+			// Load all partners and groups from IndexedDB
+			const cachedPartners = await getAll(STORES.PARTNERS);
+			const cachedGroups = await getAll(STORES.GROUPS);
+			
+			const partnerMap = new Map(cachedPartners.map(p => [Number(p.id), p.display_name]));
+			const groupMap = new Map(cachedGroups.map(g => [Number(g.id), g.display_name]));
+			
 			const partnerIds = new Set();
 			const groupIds = new Set();
 
@@ -100,15 +105,17 @@ function createOfflineExpenseCacheStore() {
 						['id', 'display_name']
 					);
 
+					// Store partners in IndexedDB
 					for (const partner of partners) {
 						partnerMap.set(Number(partner.id), partner.display_name);
+						await put(STORES.PARTNERS, partner);
 					}
 				} catch (err) {
 					console.warn('Failed to fetch partner names (offline?):', err);
 				}
 			}
 
-			// Fetch missing group names
+			// Fetch missing group names (groups are already in IndexedDB from groupCache)
 			if (missingGroupIds.length > 0 && navigator.onLine) {
 				try {
 					const groups = await odooClient.searchModel(
@@ -117,6 +124,7 @@ function createOfflineExpenseCacheStore() {
 						['id', 'display_name']
 					);
 
+					// Store groups in map (already in IndexedDB via groupCache)
 					for (const group of groups) {
 						groupMap.set(Number(group.id), group.display_name);
 					}
@@ -173,13 +181,19 @@ function createOfflineExpenseCacheStore() {
 			const lastSyncTime = await meta('lastExpenseSync') || 0;
 			const now = Date.now();
 			const isStale = now - lastSyncTime > CACHE_DURATION_MS;
+			
+			// Sort expenses
+			const sortedExpenses = expenses.sort((a, b) => {
+				const aId = typeof a.id === 'number' ? a.id : 0;
+				const bId = typeof b.id === 'number' ? b.id : 0;
+				return aId - bId;
+			});
+			
+			// Always resolve partner names when loading from DB
+			const expensesWithNames = await resolvePartnerNames(sortedExpenses);
 
 			return {
-				expenses: expenses.sort((a, b) => {
-					const aId = typeof a.id === 'number' ? a.id : 0;
-					const bId = typeof b.id === 'number' ? b.id : 0;
-					return aId - bId;
-				}),
+				expenses: expensesWithNames,
 				lastSync: lastSyncTime,
 				isStale
 			};
@@ -200,7 +214,20 @@ function createOfflineExpenseCacheStore() {
 
 		try {
 			// First, process any pending sync queue items
-			await processSyncQueue();
+			const syncResult = await processSyncQueue();
+			
+			// If items were processed, reload from DB to remove duplicates
+			if (syncResult.processed > 0) {
+				const cached = await loadFromDB();
+				const expensesWithNames = await resolvePartnerNames(cached.expenses);
+				const newBalances = calculateBalances(expensesWithNames);
+				
+				update(state => ({
+					...state,
+					expenses: expensesWithNames,
+					balances: newBalances
+				}));
+			}
 
 			const fields = [
 				'id',
@@ -344,15 +371,32 @@ function createOfflineExpenseCacheStore() {
 	async function createExpense(fields) {
 		const localId = `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
+		// Convert Odoo many2many format to simple array of IDs for local storage
+		const localFields = { ...fields };
+		
+		// Extract participant IDs from many2many command format: [[6, 0, [id1, id2, ...]]]
+		if (Array.isArray(localFields.x_studio_participants) && 
+		    localFields.x_studio_participants.length > 0 &&
+		    Array.isArray(localFields.x_studio_participants[0]) &&
+		    localFields.x_studio_participants[0][0] === 6) {
+			// Extract the actual IDs from [[6, 0, [ids]]]
+			localFields.x_studio_participants = localFields.x_studio_participants[0][2] || [];
+		}
+		
+		// Create expense with resolved names for immediate display
 		const newExpense = {
 			id: localId,
-			...fields,
+			...localFields,
 			syncStatus: 'pending',
 			localTimestamp: Date.now()
 		};
+		
+		// Resolve partner names immediately so they display correctly
+		const resolvedExpenses = await resolvePartnerNames([newExpense]);
+		const expenseWithNames = resolvedExpenses[0];
 
-		// Save to IndexedDB immediately
-		await put(STORES.EXPENSES, newExpense);
+		// Save to IndexedDB with resolved names
+		await put(STORES.EXPENSES, expenseWithNames);
 
 		// Add to sync queue
 		await queueOperation('create', 'expense', fields, localId);

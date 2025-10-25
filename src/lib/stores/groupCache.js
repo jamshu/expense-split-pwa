@@ -9,7 +9,9 @@ const CACHE_DURATION_MS = 10 * 60 * 1000; // 10 minutes
  * @typedef {Object} ExpenseGroup
  * @property {number|string} id
  * @property {string} name
- * @property {any[]} participants
+ * @property {string} [display_name]
+ * @property {any[]} [x_studio_members]
+ * @property {any[]} [participants]
  * @property {string} [description]
  * @property {string} syncStatus - 'synced' | 'pending' | 'failed'
  */
@@ -54,7 +56,7 @@ function createGroupCacheStore() {
 		update(state => ({ ...state, loading: true, error: '' }));
 
 		try {
-			const fields = ['id', 'name', 'x_studio_participants', 'x_studio_description'];
+			const fields = ['id', 'display_name', 'x_studio_members'];
 			const fetchedGroups = await odooClient.fetchExpenseGroups([], fields);
 
 			// Mark as synced
@@ -63,8 +65,28 @@ function createGroupCacheStore() {
 				syncStatus: 'synced'
 			}));
 
-			// Save to IndexedDB
+			// Extract and store all unique partners from groups
+			const allPartners = [];
+			for (const group of syncedGroups) {
+				if (Array.isArray(group.x_studio_members)) {
+					for (const member of group.x_studio_members) {
+						if (Array.isArray(member) && member.length >= 2) {
+							// Format: [id, "display_name"]
+							const partnerId = Number(member[0]);
+							const partnerName = member[1];
+							if (!allPartners.find(p => p.id === partnerId)) {
+								allPartners.push({ id: partnerId, display_name: partnerName });
+							}
+						}
+					}
+				}
+			}
+
+			// Save groups and partners to IndexedDB
 			await putMany(STORES.GROUPS, syncedGroups);
+			if (allPartners.length > 0) {
+				await putMany(STORES.PARTNERS, allPartners);
+			}
 			await meta('lastGroupSync', Date.now());
 
 			update(state => ({

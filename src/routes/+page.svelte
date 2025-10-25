@@ -1,9 +1,10 @@
 <script>
 	import { odooClient } from '$lib/odoo';
-	import { expenseCache } from '$lib/stores/expenseCache';
+	import { offlineExpenseCache as expenseCache } from '$lib/stores/offlineExpenseCache';
+	import { groupCache } from '$lib/stores/groupCache';
 	import { defaultGroup } from '$lib/stores/defaultGroup';
-	import { onMount } from 'svelte';
-
+	import { getAll, STORES } from '$lib/db';
+	import { onMount, onDestroy } from 'svelte';
 	let description = '';
 	let amount = '';
 	let payer = '';
@@ -15,31 +16,44 @@
 	let selectedGroup = ''; // selected expense group ID
 	let partners = []; // loaded from Odoo (id, display_name) - members of selected group
 	let showGroupSelector = false; // toggle for group selector
+	let isOffline = !navigator.onLine; // track online/offline status
+
+	// Listen for online/offline events
+	if (typeof window !== 'undefined') {
+		window.addEventListener('online', () => { isOffline = false; });
+		window.addEventListener('offline', () => { isOffline = true; });
+	}
+
+	// Subscribe to group cache
+	const unsubscribeGroups = groupCache.subscribe($groupCache => {
+		if ($groupCache.groups && $groupCache.groups.length > 0) {
+			expenseGroups = $groupCache.groups;
+			
+			// Auto-select group if needed
+			if (!selectedGroup) {
+				const defaultGroupId = defaultGroup.get();
+				
+				if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
+					selectedGroup = defaultGroupId;
+					loadGroupMembers(selectedGroup);
+				} else if (expenseGroups.length === 1) {
+					selectedGroup = expenseGroups[0].id;
+					defaultGroup.setDefault(selectedGroup);
+					loadGroupMembers(selectedGroup);
+				} else if (expenseGroups.length > 1) {
+					showGroupSelector = !defaultGroupId;
+				}
+			}
+		}
+	});
 
 	onMount(async () => {
-		try {
-			// Load expense groups
-			expenseGroups = await odooClient.fetchExpenseGroups();
-
-			// Load default group from store
-			const defaultGroupId = defaultGroup.get();
-
-			if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
-				// Use saved default group
-				selectedGroup = defaultGroupId;
-				await loadGroupMembers(selectedGroup);
-			} else if (expenseGroups.length === 1) {
-				// If there's only one group, auto-select it and save as default
-				selectedGroup = expenseGroups[0].id;
-				defaultGroup.setDefault(selectedGroup);
-				await loadGroupMembers(selectedGroup);
-			} else if (expenseGroups.length > 1) {
-				// Multiple groups, show selector if no default
-				showGroupSelector = !defaultGroupId;
-			}
-		} catch (err) {
-			console.error('Failed to load expense groups', err);
-		}
+		// Initialize group cache (loads from IndexedDB or fetches if needed)
+		await groupCache.initialize();
+	});
+	
+	onDestroy(() => {
+		unsubscribeGroups();
 	});
 
 	async function loadGroupMembers(groupId) {
@@ -50,7 +64,71 @@
 
 		try {
 			loading = true;
-			partners = await odooClient.fetchGroupMembers(groupId);
+			message = ''; // Clear any previous messages
+			
+			// Find the group in cached groups
+			const group = expenseGroups.find(g => g.id === groupId);
+			console.log('Loading members for group:', groupId, 'Found:', group);
+			
+			if (group && group.x_studio_members && Array.isArray(group.x_studio_members)) {
+				console.log('Group members:', group.x_studio_members);
+				
+				// Load all partners from IndexedDB to resolve names
+				const cachedPartners = await getAll(STORES.PARTNERS);
+				const partnerMap = new Map(cachedPartners.map(p => [Number(p.id), p.display_name]));
+				console.log('Cached partners:', partnerMap);
+				
+				// Extract member IDs and resolve names
+				const memberIds = [];
+				for (const member of group.x_studio_members) {
+					let partnerId, partnerName;
+					
+					if (Array.isArray(member) && member.length >= 2) {
+						// Format: [id, "display_name"]
+						partnerId = Number(member[0]);
+						partnerName = String(member[1]);
+					} else if (typeof member === 'number') {
+						// Just ID - resolve from partner cache
+						partnerId = Number(member);
+						partnerName = partnerMap.get(partnerId);
+						console.log(`Resolving member ${partnerId}: ${partnerName}`);
+					}
+					
+					// Only add if we have a valid ID and name
+					if (partnerId && partnerName && partnerName !== 'false' && partnerName !== 'undefined' && partnerName !== 'null') {
+						memberIds.push({
+							id: partnerId,
+							display_name: partnerName
+						});
+					}
+				}
+				
+				console.log('Extracted members:', memberIds);
+				
+				if (memberIds.length > 0) {
+					// Use cached data
+					partners = memberIds;
+					console.log('Using cached members:', partners);
+				} else if (navigator.onLine) {
+					// No valid cached names, fetch from API
+					console.log('No cached names, fetching from API...');
+					partners = await odooClient.fetchGroupMembers(groupId);
+				} else {
+					// Offline with no valid cached names
+					console.warn('Offline with no cached member names');
+					partners = [];
+					message = '⚠️ No member data available offline. Please go online first.';
+				}
+			} else if (navigator.onLine) {
+				// No cached members field, fetch from API
+				console.log('No x_studio_members field, fetching from API...');
+				partners = await odooClient.fetchGroupMembers(groupId);
+			} else {
+				// Offline and no cached data
+				console.warn('Offline with no group member data');
+				partners = [];
+				message = '⚠️ No group data available offline. Please go online first.';
+			}
 
 			// Reset payer and participants when group changes
 			payer = '';
@@ -107,12 +185,14 @@
 				// set date on payload
 				payload.x_studio_date = new Date().toISOString().split('T')[0];
 
-			await odooClient.createExpense(payload);
+			// Use offline cache to create expense (works offline!)
+			await expenseCache.createExpense(payload);
 
-		message = '✅ Expense added successfully!';
-
-		// Immediately sync the expense cache to update balances
-		expenseCache.sync();
+			if (navigator.onLine) {
+				message = '✅ Expense added successfully!';
+			} else {
+				message = '✅ Expense saved locally! Will sync when online.';
+			}
 
 		// Reset form (keep group selection)
 		description = '';
@@ -133,6 +213,13 @@
 
 <div class="container">
 	<h1>💰 Expense Split</h1>
+
+	<!-- Offline Indicator -->
+	{#if isOffline}
+		<div class="offline-banner">
+			📡 Offline Mode - Expenses will be synced when you're back online
+		</div>
+	{/if}
 
 	<nav>
 		<a href="/" class="active">Add Expense</a>
@@ -277,6 +364,23 @@
 	nav a.active {
 		background: #667eea;
 		color: white;
+	}
+
+	.offline-banner {
+		background: #e3f2fd;
+		color: #1565c0;
+		padding: 12px 20px;
+		border-radius: 10px;
+		margin-bottom: 20px;
+		text-align: center;
+		font-weight: 600;
+		border: 2px solid #64b5f6;
+		animation: pulse 2s infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.8; }
 	}
 
 	form {

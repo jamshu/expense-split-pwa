@@ -6,12 +6,13 @@
  */
 
 const DB_NAME = 'expense_split_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented to add partners store
 
 // Object store names
 export const STORES = {
 	EXPENSES: 'expenses',
 	GROUPS: 'groups',
+	PARTNERS: 'partners',
 	SYNC_QUEUE: 'sync_queue',
 	META: 'meta'
 };
@@ -51,6 +52,12 @@ export async function initDB() {
 				const groupStore = database.createObjectStore(STORES.GROUPS, { keyPath: 'id' });
 				groupStore.createIndex('name', 'name', { unique: false });
 				groupStore.createIndex('syncStatus', 'syncStatus', { unique: false });
+			}
+
+			// Partners store
+			if (!database.objectStoreNames.contains(STORES.PARTNERS)) {
+				const partnerStore = database.createObjectStore(STORES.PARTNERS, { keyPath: 'id' });
+				partnerStore.createIndex('display_name', 'display_name', { unique: false });
 			}
 
 			// Sync queue store

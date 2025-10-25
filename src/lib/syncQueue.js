@@ -2,6 +2,7 @@
 import { writable } from 'svelte/store';
 import { STORES, getAll, put, remove, getByIndex } from './db.js';
 import { odooClient } from './odoo.js';
+// STORES is already imported above - includes EXPENSES
 
 /**
  * @typedef {Object} SyncQueueItem
@@ -159,10 +160,25 @@ export async function processSyncQueue() {
 			await remove(STORES.SYNC_QUEUE, item.id);
 			processed++;
 
-			// If this was a create operation, update the local record with remote ID
-			if (item.operation === 'create' && result.remoteId) {
-				// Notify about the ID mapping
+			// If this was a create operation, replace local record with server record
+			if (item.operation === 'create' && result.remoteId && item.localId) {
 				console.log(`Local ID ${item.localId} -> Remote ID ${result.remoteId}`);
+				
+				// Remove the local record
+				try {
+					await remove(STORES.EXPENSES, item.localId);
+				} catch (err) {
+					console.warn('Failed to remove local expense:', err);
+				}
+			}
+			
+			// If this was a delete operation, ensure local record is removed
+			if (item.operation === 'delete' && item.remoteId) {
+				try {
+					await remove(STORES.EXPENSES, item.remoteId);
+				} catch (err) {
+					console.warn('Failed to remove expense after delete:', err);
+				}
 			}
 		} else {
 			// Mark as failed and increment retry count

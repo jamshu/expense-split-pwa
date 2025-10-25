@@ -1,6 +1,7 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
 	import { offlineExpenseCache as expenseCache, recentExpenses, cacheStatus } from '$lib/stores/offlineExpenseCache';
+	import { groupCache } from '$lib/stores/groupCache';
 	import { defaultGroup } from '$lib/stores/defaultGroup';
 	import { odooClient } from '$lib/odoo';
 	import { calculateBalances } from '$lib/expenseUtils';
@@ -72,42 +73,27 @@
 		failedSyncCount = $status.failedSyncCount || 0;
 	});
 	
-	onMount(async () => {
-		// Start both operations in parallel for faster loading
-		const groupsPromise = odooClient.fetchExpenseGroups().catch(err => {
-			console.error('Failed to load expense groups', err);
-			error = 'Failed to load expense groups';
-			return [];
-		});
-
-	// Load default group from store
-	const defaultGroupId = defaultGroup.get();
-	
-	// Set selected group if we have a default
-	if (defaultGroupId) {
-		selectedGroup = defaultGroupId;
-	}
-	
-	// Initialize cache immediately (will show cached data)
-	expenseCache.initialize(); // Don't await
-		
-		// Now wait for groups to finish loading
-		expenseGroups = await groupsPromise;
-		
-		// Handle group selection after groups are loaded
-		if (expenseGroups.length > 0) {
-			if (defaultGroupId && expenseGroups.find(g => g.id === defaultGroupId)) {
-				// Already set above, just verify it exists
-				selectedGroup = defaultGroupId;
-			} else if (expenseGroups.length === 1) {
-				// If there's only one group, auto-select it and save as default
-			selectedGroup = expenseGroups[0].id;
-			defaultGroup.setDefault(selectedGroup);
-		} else if (expenseGroups.length > 1) {
-				// Multiple groups, show selector if no default
-				showGroupSelector = !defaultGroupId;
-			}
+	// Subscribe to group cache
+	const unsubscribeGroups = groupCache.subscribe($groupCache => {
+		if ($groupCache.groups && $groupCache.groups.length > 0) {
+			expenseGroups = $groupCache.groups;
 		}
+	});
+	
+	onMount(async () => {
+		// Load default group from store
+		const defaultGroupId = defaultGroup.get();
+		
+		// Set selected group if we have a default
+		if (defaultGroupId) {
+			selectedGroup = defaultGroupId;
+		}
+		
+		// Initialize caches (loads from IndexedDB, works offline!)
+		expenseCache.initialize();
+		groupCache.initialize();
+		
+		// Handle group selection after groups are loaded via subscription
 	});
 
 function handleGroupChange() {
@@ -128,6 +114,7 @@ function handleGroupChange() {
 		// Clean up subscriptions and background sync
 		unsubscribeCache();
 		unsubscribeStatus();
+		unsubscribeGroups();
 		expenseCache.destroy();
 	});
 	
