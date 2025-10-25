@@ -130,9 +130,9 @@
 				message = '⚠️ No group data available offline. Please go online first.';
 			}
 
-			// Reset payer and participants when group changes
+			// Reset payer and set all participants as default selected
 			payer = '';
-			participants = [];
+			participants = partners.map(p => p.id);
 		} catch (err) {
 			console.error('Failed to load group members', err);
 			message = `❌ Failed to load group members: ${err.message}`;
