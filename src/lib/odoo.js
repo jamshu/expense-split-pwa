@@ -113,10 +113,14 @@ class OdooAPI {
 
 	/**
 	 * Fetch all expense groups from x_expensegroup model
+	 * @param {any[]} domain
+	 * @param {string[]} fields
 	 * @returns {Promise<Array<{id:number, display_name:string, x_studio_members:any}>>}
 	 */
-	async fetchExpenseGroups() {
-		return await this.searchModel('x_expensegroup', [], ['id', 'display_name', 'x_studio_members']);
+	async fetchExpenseGroups(domain = [], fields = []) {
+		// Use provided fields or default to common fields
+		const fieldsToFetch = fields.length > 0 ? fields : ['id', 'display_name', 'x_studio_members'];
+		return await this.searchModel('x_expensegroup', domain, fieldsToFetch);
 	}
 
 	/**
@@ -199,6 +203,37 @@ class OdooAPI {
 	 */
 	async deleteExpense(id) {
 		const result = await this.callApi('delete', { id });
+		return result.result;
+	}
+
+	/**
+	 * Create an expense group
+	 * @param {Record<string, any>} fields
+	 * @returns {Promise<number>}
+	 */
+	async createExpenseGroup(fields) {
+		const result = await this.callApi('create_group', fields);
+		return result.id;
+	}
+
+	/**
+	 * Update an expense group
+	 * @param {number} id
+	 * @param {Record<string, any>} values
+	 * @returns {Promise<boolean>}
+	 */
+	async updateExpenseGroup(id, values) {
+		const result = await this.callApi('update_group', { id, values });
+		return result.result;
+	}
+
+	/**
+	 * Delete an expense group
+	 * @param {number} id
+	 * @returns {Promise<boolean>}
+	 */
+	async deleteExpenseGroup(id) {
+		const result = await this.callApi('delete_group', { id });
 		return result.result;
 	}
 

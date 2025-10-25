@@ -1,8 +1,9 @@
 <script>
 	import { onMount, onDestroy } from 'svelte';
-	import { expenseCache, recentExpenses, cacheStatus } from '$lib/stores/expenseCache';
+	import { offlineExpenseCache as expenseCache, recentExpenses, cacheStatus } from '$lib/stores/offlineExpenseCache';
 	import { defaultGroup } from '$lib/stores/defaultGroup';
 	import { odooClient } from '$lib/odoo';
+	import { calculateBalances } from '$lib/expenseUtils';
 
 	// Subscribe to cache store
 	let expenses = [];
@@ -12,6 +13,9 @@
 	let error = '';
 	let lastSync = 0;
 	let isStale = false;
+	let isOffline = false;
+	let pendingSyncCount = 0;
+	let failedSyncCount = 0;
 
 	let selectedParticipant = '';
 	let showParticipantDetails = false;
@@ -27,28 +31,45 @@
 	let showSettledExpenses = false;
 	let bulkActionLoading = false;
 	
-	// Reactive filtered expenses
-	$: settledExpenses = expenses.filter(e => e.x_studio_is_done === true);
-	$: unsettledExpenses = expenses.filter(e => e.x_studio_is_done !== true);
+	// Reactive filtered expenses - filter by selected group
+	$: groupFilteredExpenses = selectedGroup 
+		? expenses.filter(e => {
+				// Handle different formats of expense group field
+				if (Array.isArray(e.x_studio_expensegroup) && e.x_studio_expensegroup.length > 0) {
+					return Number(e.x_studio_expensegroup[0]) === Number(selectedGroup);
+				} else if (typeof e.x_studio_expensegroup === 'number') {
+					return e.x_studio_expensegroup === Number(selectedGroup);
+				} else if (typeof e.x_studio_expensegroup === 'string') {
+					// Already resolved to group name, compare with selected group name
+					const selectedGroupName = expenseGroups.find(g => g.id === selectedGroup)?.display_name;
+					return e.x_studio_expensegroup === selectedGroupName;
+				}
+				return false;
+		  })
+		: expenses;
+	
+	$: settledExpenses = groupFilteredExpenses.filter(e => e.x_studio_is_done === true);
+	$: unsettledExpenses = groupFilteredExpenses.filter(e => e.x_studio_is_done !== true);
 	$: visibleExpenses = showSettledExpenses ? settledExpenses : unsettledExpenses;
+	
+	// Calculate balances only for filtered expenses
+	$: filteredBalances = selectedGroup ? calculateBalances(groupFilteredExpenses) : balances;
 	
 	// Subscribe to cache updates
 	const unsubscribeCache = expenseCache.subscribe($cache => {
 		expenses = $cache.expenses;
-		balances = $cache.balances;
+		balances = $cache.balances; // Keep original balances, we'll filter them reactively
 		loading = $cache.loading;
 		error = $cache.error;
-		
-		// Clear selections when expenses change (e.g., after group change)
-		if ($cache.selectedGroupId !== selectedGroup && selectedGroup !== null) {
-			selectedExpenseIds = new Set();
-		}
 	});
 	
 	const unsubscribeStatus = cacheStatus.subscribe($status => {
 		syncing = $status.isSyncing;
 		lastSync = $status.lastSync;
 		isStale = $status.isStale;
+		isOffline = $status.isOffline;
+		pendingSyncCount = $status.pendingSyncCount || 0;
+		failedSyncCount = $status.failedSyncCount || 0;
 	});
 	
 	onMount(async () => {
@@ -59,17 +80,16 @@
 			return [];
 		});
 
-		// Load default group from store
-		const defaultGroupId = defaultGroup.get();
-		
-		// Set group filter if we have a default (non-blocking)
-		if (defaultGroupId) {
-			selectedGroup = defaultGroupId;
-			expenseCache.setGroupFilter(selectedGroup); // Don't await
-		}
-		
-		// Initialize cache immediately (will show cached data)
-		expenseCache.initialize(); // Don't await
+	// Load default group from store
+	const defaultGroupId = defaultGroup.get();
+	
+	// Set selected group if we have a default
+	if (defaultGroupId) {
+		selectedGroup = defaultGroupId;
+	}
+	
+	// Initialize cache immediately (will show cached data)
+	expenseCache.initialize(); // Don't await
 		
 		// Now wait for groups to finish loading
 		expenseGroups = await groupsPromise;
@@ -81,34 +101,24 @@
 				selectedGroup = defaultGroupId;
 			} else if (expenseGroups.length === 1) {
 				// If there's only one group, auto-select it and save as default
-				selectedGroup = expenseGroups[0].id;
-				defaultGroup.setDefault(selectedGroup);
-				if (!defaultGroupId) {
-					// Only set filter if we didn't already have a default
-					expenseCache.setGroupFilter(selectedGroup);
-				}
-			} else if (expenseGroups.length > 1) {
+			selectedGroup = expenseGroups[0].id;
+			defaultGroup.setDefault(selectedGroup);
+		} else if (expenseGroups.length > 1) {
 				// Multiple groups, show selector if no default
 				showGroupSelector = !defaultGroupId;
 			}
 		}
 	});
 
-	async function handleGroupChange() {
-		if (selectedGroup) {
-			// Save as default when group changes
-			defaultGroup.setDefault(selectedGroup);
-			
-			// Clear expenses immediately for visual feedback
-			expenses = [];
-			balances = {};
-			selectedExpenseIds = new Set();
-			
-			// Load new group data
-			await expenseCache.setGroupFilter(selectedGroup);
-			showGroupSelector = false; // Hide selector after selection
-		}
+function handleGroupChange() {
+	if (selectedGroup) {
+		// Save as default when group changes
+		defaultGroup.setDefault(selectedGroup);
+		showGroupSelector = false; // Hide selector after selection
+		// Clear selections when group changes
+		selectedExpenseIds = new Set();
 	}
+}
 
 	function toggleGroupSelector() {
 		showGroupSelector = !showGroupSelector;
@@ -349,15 +359,21 @@
 	<!-- Cache Status Bar -->
 	<div class="cache-status-bar">
 		<div class="cache-info">
-			{#if syncing}
+			{#if isOffline}
+				<span class="cache-badge offline">📡 Offline Mode</span>
+			{:else if syncing}
 				<span class="sync-indicator">
 					<span class="sync-spinner"></span>
 					Syncing...
 				</span>
+			{:else if failedSyncCount > 0}
+				<span class="cache-badge failed">⚠️ {failedSyncCount} failed</span>
+			{:else if pendingSyncCount > 0}
+				<span class="cache-badge pending">⏳ {pendingSyncCount} pending</span>
 			{:else if isStale}
 				<span class="cache-badge stale">⚠️ Stale cache</span>
 			{:else}
-				<span class="cache-badge fresh">✓ Up to date</span>
+				<span class="cache-badge fresh">✓ Synced</span>
 			{/if}
 			
 			<span class="last-sync">
@@ -386,11 +402,11 @@
 	{:else}
 		<div class="report-card">
 			<h2>💵 Individual Balances</h2>
-			{#if Object.keys(balances).length === 0}
-				<p class="empty">No expenses recorded yet.</p>
+			{#if Object.keys(filteredBalances).length === 0}
+				<p class="empty">No expenses recorded yet for this group.</p>
 			{:else}
 				<div class="balance-list">
-					{#each Object.entries(balances) as [person, balance]}
+					{#each Object.entries(filteredBalances) as [person, balance]}
 						<div class="balance-item" class:positive={balance > 0} class:negative={balance < 0} on:click={() => openParticipantDetails(person)} on:keydown={(e) => e.key === 'Enter' && openParticipantDetails(person)} role="button" tabindex="0">
 							<span class="person">{person}</span>
 							<span class="amount" class:green={balance > 0} class:red={balance < 0}>
@@ -599,11 +615,14 @@
 									</span>
 									<span class="expense-amount">{formatCurrency(expense.x_studio_value)}</span>
 								</div>
-								<div class="expense-details">
-									<span>Date: <strong>{expense.x_studio_date}</strong></span>
-									<span>Paid by: <strong>{expense.x_studio_who_paid}</strong></span>
-									<span>Split: {expense.x_studio_participants}</span>
-								</div>
+							<div class="expense-details">
+								<span>Date: <strong>{expense.x_studio_date}</strong></span>
+								<span>Paid by: <strong>{expense.x_studio_who_paid}</strong></span>
+								{#if expense.x_studio_expensegroup}
+									<span>Group: <strong>{expense.x_studio_expensegroup}</strong></span>
+								{/if}
+								<span>Split: {expense.x_studio_participants}</span>
+							</div>
 							</div>
 						</div>
 					{/each}
@@ -1193,6 +1212,21 @@
 	.cache-badge.stale {
 		background: #fff3e0;
 		color: #ef6c00;
+	}
+	
+	.cache-badge.offline {
+		background: #e3f2fd;
+		color: #1565c0;
+	}
+	
+	.cache-badge.pending {
+		background: #fff9c4;
+		color: #f57f17;
+	}
+	
+	.cache-badge.failed {
+		background: #ffebee;
+		color: #c62828;
 	}
 	
 	.sync-indicator {
