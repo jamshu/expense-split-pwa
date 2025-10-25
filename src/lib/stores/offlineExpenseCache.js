@@ -485,6 +485,26 @@ function createOfflineExpenseCacheStore() {
 		}
 	}
 
+	// Bulk update expenses (for optimistic updates)
+	async function updateExpenses(updatedExpenses) {
+		try {
+			// Store all updated expenses in IndexedDB
+			await putMany(STORES.EXPENSES, updatedExpenses);
+			
+			// Resolve partner names and update store
+			const expensesWithNames = await resolvePartnerNames(updatedExpenses);
+			const balances = calculateBalances(expensesWithNames);
+			
+			update(state => ({
+				...state,
+				expenses: expensesWithNames,
+				balances
+			}));
+		} catch (error) {
+			console.error('Failed to update expenses:', error);
+		}
+	}
+
 	// Force refresh
 	async function forceRefresh() {
 		await sync(true);
@@ -510,6 +530,7 @@ function createOfflineExpenseCacheStore() {
 		sync,
 		createExpense,
 		updateExpense,
+		updateExpenses,
 		deleteExpense,
 		forceRefresh,
 		destroy
