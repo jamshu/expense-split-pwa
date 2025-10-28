@@ -126,7 +126,7 @@ class OdooAPI {
 	/**
 	 * Fetch members of a specific expense group
 	 * @param {number} groupId - The expense group ID
-	 * @returns {Promise<Array<{id:number, display_name:string}>>}
+	 * @returns {Promise<Array<{id:number, display_name:string, x_studio_is_default:boolean}>>}
 	 */
 	async fetchGroupMembers(groupId) {
 		if (!groupId) return [];
@@ -155,8 +155,8 @@ class OdooAPI {
 
 		if (memberIds.length === 0) return [];
 
-		// Fetch partner display names for these member IDs
-		return await this.searchModel('res.partner', [['id', 'in', memberIds]], ['id', 'display_name']);
+		// Fetch partner display names and x_studio_is_default field for these member IDs
+		return await this.searchModel('res.partner', [['id', 'in', memberIds]], ['id', 'display_name', 'x_studio_is_default']);
 	}
 
 	/**

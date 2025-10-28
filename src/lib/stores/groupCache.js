@@ -100,7 +100,7 @@ function createGroupCacheStore() {
 						const partners = await odooClient.searchModel(
 							'res.partner',
 							[['id', 'in', missingIds]],
-							['id', 'display_name']
+							['id', 'display_name', 'x_studio_is_default']
 						);
 						allPartners.push(...partners);
 					}

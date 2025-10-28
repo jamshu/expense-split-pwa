@@ -73,32 +73,38 @@
 			if (group && group.x_studio_members && Array.isArray(group.x_studio_members)) {
 				console.log('Group members:', group.x_studio_members);
 				
-				// Load all partners from IndexedDB to resolve names
+				// Load all partners from IndexedDB to resolve names and default status
 				const cachedPartners = await getAll(STORES.PARTNERS);
-				const partnerMap = new Map(cachedPartners.map(p => [Number(p.id), p.display_name]));
+				const partnerMap = new Map(cachedPartners.map(p => [Number(p.id), p]));
 				console.log('Cached partners:', partnerMap);
-				
+
 				// Extract member IDs and resolve names
 				const memberIds = [];
 				for (const member of group.x_studio_members) {
-					let partnerId, partnerName;
-					
+					let partnerId, partnerName, isDefault;
+
 					if (Array.isArray(member) && member.length >= 2) {
 						// Format: [id, "display_name"]
 						partnerId = Number(member[0]);
 						partnerName = String(member[1]);
+						// Get x_studio_is_default from cache
+						const cachedPartner = partnerMap.get(partnerId);
+						isDefault = cachedPartner?.x_studio_is_default || false;
 					} else if (typeof member === 'number') {
 						// Just ID - resolve from partner cache
 						partnerId = Number(member);
-						partnerName = partnerMap.get(partnerId);
-						console.log(`Resolving member ${partnerId}: ${partnerName}`);
+						const cachedPartner = partnerMap.get(partnerId);
+						partnerName = cachedPartner?.display_name;
+						isDefault = cachedPartner?.x_studio_is_default || false;
+						console.log(`Resolving member ${partnerId}: ${partnerName}, isDefault: ${isDefault}`);
 					}
-					
+
 					// Only add if we have a valid ID and name
 					if (partnerId && partnerName && partnerName !== 'false' && partnerName !== 'undefined' && partnerName !== 'null') {
 						memberIds.push({
 							id: partnerId,
-							display_name: partnerName
+							display_name: partnerName,
+							x_studio_is_default: isDefault
 						});
 					}
 				}
@@ -130,9 +136,9 @@
 				message = '⚠️ No group data available offline. Please go online first.';
 			}
 
-			// Reset payer and set all participants as default selected
+			// Reset payer and set only default participants as selected
 			payer = '';
-			participants = partners.map(p => p.id);
+			participants = partners.filter(p => p.x_studio_is_default === true).map(p => p.id);
 		} catch (err) {
 			console.error('Failed to load group members', err);
 			message = `❌ Failed to load group members: ${err.message}`;
